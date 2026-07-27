@@ -1,4 +1,6 @@
 import './App.css'
+import EmployeeCard from './components/EmployeeCard'
+import { mockEmployees } from './data/mockEmployees'
 
 function App() {
   return (
@@ -13,9 +15,19 @@ function App() {
       </header>
 
       <section>
-        <h2>Employee profiles</h2>
-        <p>No employee data has been connected yet.</p>
-        <button type="button">Add data source</button>
+        <div className="section-heading">
+          <div>
+            <h2>Employee profiles</h2>
+            <p>Demonstration data for the initial frontend.</p>
+          </div>
+          <button type="button">Add data source</button>
+        </div>
+
+        <div className="employee-grid">
+          {mockEmployees.map((employee) => (
+            <EmployeeCard key={employee.id} employee={employee} />
+          ))}
+        </div>
       </section>
     </main>
   )
