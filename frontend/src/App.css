@@ -124,3 +124,30 @@ button:hover {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+.search {
+  display: grid;
+  gap: 8px;
+  margin-top: 28px;
+  font-weight: 700;
+}
+
+.search input {
+  width: 100%;
+  padding: 13px 15px;
+  border: 1px solid #cfd5df;
+  border-radius: 10px;
+  color: #172033;
+  background: white;
+  font: inherit;
+}
+
+.search input:focus {
+  border-color: #4f46e5;
+  outline: 3px solid rgb(79 70 229 / 15%);
+}
+
+.result-count {
+  margin: 16px 0 0;
+  font-size: 0.9rem;
+}
