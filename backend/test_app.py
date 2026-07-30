@@ -18,4 +18,8 @@ def test_employees_endpoint():
 
     assert response.status_code == 200
     assert len(employees) == 3
-    assert employees[0]["name"] == "Maya Chen"
+    assert {employee["name"] for employee in employees} == {
+    "Jordan Rivera",
+    "Maya Chen",
+    "Sam Okafor",
+}
