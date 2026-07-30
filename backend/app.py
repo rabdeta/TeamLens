@@ -6,6 +6,7 @@ from sqlalchemy import URL
 
 from backend.models import Employee, db
 from backend.seed_data import EMPLOYEE_SEED_DATA
+from flask_migrate import Migrate
 
 load_dotenv()
 
@@ -22,6 +23,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
+migrate = Migrate(app, db)
 
 
 @app.get("/api/health")
@@ -38,10 +40,6 @@ def get_employees():
     return jsonify([employee.to_dict() for employee in employees])
 
 
-@app.cli.command("init-db")
-def init_db():
-    db.create_all()
-    print("Database tables created.")
 
 @app.cli.command("seed-db")
 def seed_db():
