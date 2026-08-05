@@ -45,6 +45,15 @@ def create_app(test_config=None):
 
         return jsonify([employee.to_dict() for employee in employees])
 
+    @app.get("/api/employees/<string:employee_id>")
+    def get_employee(employee_id):
+        employee = db.session.get(Employee, employee_id)
+
+        if employee is None:
+            return jsonify(error="Employee not found"), 404
+
+        return jsonify(employee.to_dict())
+
     @app.cli.command("seed-db")
     def seed_db():
         added_count = 0

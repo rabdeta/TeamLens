@@ -60,3 +60,18 @@ def test_employees_endpoint(client):
     assert maya["measurementPeriodDays"] == 30
     assert maya["dataCoveragePercent"] == 100
     assert maya["lastSyncedAt"]
+
+def test_employee_detail_endpoint(client):
+    response = client.get("/api/employees/emp-001")
+    employee = response.get_json()
+
+    assert response.status_code == 200
+    assert employee["name"] == "Maya Chen"
+    assert employee["measurementPeriodDays"] == 30
+
+
+def test_employee_detail_not_found(client):
+    response = client.get("/api/employees/does-not-exist")
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "Employee not found"}
