@@ -2,9 +2,10 @@ import type { EmployeeProfile } from '../types/employee'
 
 type EmployeeCardProps = {
   employee: EmployeeProfile
+  onSelect: (employeeId: string) => void
 }
 
-function EmployeeCard({ employee }: EmployeeCardProps) {
+function EmployeeCard({ employee, onSelect }: EmployeeCardProps) {
   const lastSynced = new Date(employee.lastSyncedAt).toLocaleString()
 
   return (
@@ -35,6 +36,14 @@ function EmployeeCard({ employee }: EmployeeCardProps) {
       </dl>
 
       <p>{employee.summary}</p>
+
+      <button
+        type="button"
+        className="profile-button"
+        onClick={() => onSelect(employee.id)}
+      >
+        View profile
+      </button>
 
       <footer className="data-context">
         <span>Period: {employee.measurementPeriodDays} days</span>

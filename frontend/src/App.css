@@ -161,3 +161,17 @@ button:hover {
   color: #667085;
   font-size: 0.8rem;
 }
+
+.profile-button {
+  margin: 8px 0 20px;
+}
+
+.profile-detail {
+  margin-top: 24px;
+  border-color: #a5b4fc;
+  background: #eef2ff;
+}
+
+.profile-detail h2 {
+  margin: 4px 0;
+}

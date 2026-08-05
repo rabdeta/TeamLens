@@ -8,6 +8,10 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [selectedEmployee, setSelectedEmployee] =
+    useState<EmployeeProfile | null>(null)
+  const [isDetailLoading, setIsDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -33,6 +37,31 @@ function App() {
 
     loadEmployees()
   }, [])
+
+  const handleSelectEmployee = async (employeeId: string) => {
+    setIsDetailLoading(true)
+    setDetailError('')
+    setSelectedEmployee(null)
+
+    try {
+      const response = await fetch(`/api/employees/${employeeId}`)
+
+      if (!response.ok) {
+        throw new Error('Failed to load employee details')
+      }
+
+      const employee: EmployeeProfile = await response.json()
+      setSelectedEmployee(employee)
+    } catch (caughtError) {
+      setDetailError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'An unexpected error occurred',
+      )
+    } finally {
+      setIsDetailLoading(false)
+    }
+  }
 
   const filteredEmployees = employees.filter((employee) => {
     const searchableText =
@@ -82,12 +111,43 @@ function App() {
 
             <div className="employee-grid">
               {filteredEmployees.map((employee) => (
-                <EmployeeCard key={employee.id} employee={employee} />
+                <EmployeeCard
+                  key={employee.id}
+                  employee={employee}
+                  onSelect={handleSelectEmployee}
+                />
               ))}
             </div>
           </>
         )}
       </section>
+
+      {isDetailLoading && <p>Loading employee details…</p>}
+      {detailError && <p role="alert">{detailError}</p>}
+
+      {selectedEmployee && (
+        <section className="profile-detail">
+          <div className="section-heading">
+            <div>
+              <p>{selectedEmployee.department}</p>
+              <h2>{selectedEmployee.name}</h2>
+              <p>{selectedEmployee.role}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedEmployee(null)}
+            >
+              Close
+            </button>
+          </div>
+
+          <p>{selectedEmployee.summary}</p>
+          <p>
+            These metrics cover {selectedEmployee.measurementPeriodDays} days
+            with {selectedEmployee.dataCoveragePercent}% data coverage.
+          </p>
+        </section>
+      )}
     </main>
   )
 }
