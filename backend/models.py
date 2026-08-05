@@ -16,6 +16,24 @@ class Employee(db.Model):
     collaboration_score = db.Column(db.Integer, nullable=False)
     summary = db.Column(db.Text, nullable=False)
 
+    measurement_period_days = db.Column(
+        db.Integer,
+        nullable=False,
+        default=30,
+        server_default="30",
+    )
+    data_coverage_percent = db.Column(
+        db.Integer,
+        nullable=False,
+        default=100,
+        server_default="100",
+    )
+    last_synced_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+    )
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -27,4 +45,7 @@ class Employee(db.Model):
             "tasksCompleted": self.tasks_completed,
             "collaborationScore": self.collaboration_score,
             "summary": self.summary,
+            "measurementPeriodDays": self.measurement_period_days,
+            "dataCoveragePercent": self.data_coverage_percent,
+            "lastSyncedAt": self.last_synced_at.isoformat(),
         }

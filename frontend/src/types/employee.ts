@@ -8,4 +8,7 @@ export type EmployeeProfile = {
   tasksCompleted: number
   collaborationScore: number
   summary: string
+  measurementPeriodDays: number
+  dataCoveragePercent: number
+  lastSyncedAt: string
 }

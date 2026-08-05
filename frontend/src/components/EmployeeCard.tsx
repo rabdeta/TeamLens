@@ -5,6 +5,8 @@ type EmployeeCardProps = {
 }
 
 function EmployeeCard({ employee }: EmployeeCardProps) {
+  const lastSynced = new Date(employee.lastSyncedAt).toLocaleString()
+
   return (
     <article className="employee-card">
       <div>
@@ -33,6 +35,12 @@ function EmployeeCard({ employee }: EmployeeCardProps) {
       </dl>
 
       <p>{employee.summary}</p>
+
+      <footer className="data-context">
+        <span>Period: {employee.measurementPeriodDays} days</span>
+        <span>Coverage: {employee.dataCoveragePercent}%</span>
+        <span>Synced: {lastSynced}</span>
+      </footer>
     </article>
   )
 }
