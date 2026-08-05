@@ -1,18 +1,47 @@
-from backend.app import app
+import pytest
+
+from backend.app import create_app
+from backend.models import Employee, db
+from backend.seed_data import EMPLOYEE_SEED_DATA
 
 
-def test_health_endpoint():
-    client = app.test_client()
+@pytest.fixture()
+def app():
+    test_app = create_app(
+        {
+            "TESTING": True,
+            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+        }
+    )
 
+    with test_app.app_context():
+        db.create_all()
+
+        db.session.add_all(
+            Employee(**employee_data)
+            for employee_data in EMPLOYEE_SEED_DATA
+        )
+        db.session.commit()
+
+        yield test_app
+
+        db.session.remove()
+        db.drop_all()
+
+
+@pytest.fixture()
+def client(app):
+    return app.test_client()
+
+
+def test_health_endpoint(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200
     assert response.get_json() == {"status": "ok"}
 
 
-def test_employees_endpoint():
-    client = app.test_client()
-
+def test_employees_endpoint(client):
     response = client.get("/api/employees")
     employees = response.get_json()
 
