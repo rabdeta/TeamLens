@@ -175,3 +175,34 @@ button:hover {
 .profile-detail h2 {
   margin: 4px 0;
 }
+
+.data-sources-section {
+  margin-top: 24px;
+}
+
+.data-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.data-source-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px;
+  border: 1px solid #e4e7ec;
+  border-radius: 14px;
+  background: #fafbfc;
+}
+
+.data-source-card h3 {
+  margin: 0 0 8px;
+}
+
+.data-source-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

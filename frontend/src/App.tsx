@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import EmployeeCard from './components/EmployeeCard'
 import type { EmployeeProfile } from './types/employee'
+import DataSourceCard from './components/DataSourceCard'
+import type { DataSource } from './types/dataSource'
 
 function App() {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([])
@@ -12,6 +14,8 @@ function App() {
     useState<EmployeeProfile | null>(null)
   const [isDetailLoading, setIsDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
+  const [dataSources, setDataSources] = useState<DataSource[]>([])
+  const [dataSourcesError, setDataSourcesError] = useState('')
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -36,6 +40,29 @@ function App() {
     }
 
     loadEmployees()
+  }, [])
+
+    useEffect(() => {
+    const loadDataSources = async () => {
+      try {
+        const response = await fetch('/api/data-sources')
+
+        if (!response.ok) {
+          throw new Error('Failed to load data sources')
+        }
+
+        const data: DataSource[] = await response.json()
+        setDataSources(data)
+      } catch (caughtError) {
+        setDataSourcesError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'An unexpected error occurred',
+        )
+      }
+    }
+
+    loadDataSources()
   }, [])
 
   const handleSelectEmployee = async (employeeId: string) => {
@@ -120,6 +147,21 @@ function App() {
             </div>
           </>
         )}
+      </section>
+
+      <section className="data-sources-section">
+        <div>
+          <h2>Data sources</h2>
+          <p>Available metadata integrations and their connection status.</p>
+        </div>
+
+        {dataSourcesError && <p role="alert">{dataSourcesError}</p>}
+
+        <div className="data-source-grid">
+          {dataSources.map((source) => (
+            <DataSourceCard key={source.id} source={source} />
+          ))}
+        </div>
       </section>
 
       {isDetailLoading && <p>Loading employee details…</p>}
