@@ -1,8 +1,8 @@
 import pytest
 
 from backend.app import create_app
-from backend.models import Employee, db
-from backend.seed_data import EMPLOYEE_SEED_DATA
+from backend.models import DataSource, Employee, db
+from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 
 
 @pytest.fixture()
@@ -21,6 +21,12 @@ def app():
             Employee(**employee_data)
             for employee_data in EMPLOYEE_SEED_DATA
         )
+
+        db.session.add_all(
+            DataSource(**source_data)
+            for source_data in DATA_SOURCE_SEED_DATA
+        )
+
         db.session.commit()
 
         yield test_app
@@ -75,3 +81,20 @@ def test_employee_detail_not_found(client):
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "Employee not found"}
+
+def test_data_sources_endpoint(client):
+    response = client.get("/api/data-sources")
+    data_sources = response.get_json()
+
+    assert response.status_code == 200
+    assert len(data_sources) == 4
+    assert {source["provider"] for source in data_sources} == {
+        "google_workspace",
+        "microsoft_graph",
+        "jira",
+        "linear",
+    }
+    assert all(
+        source["status"] == "not_connected"
+        for source in data_sources
+    )

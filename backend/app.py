@@ -5,8 +5,8 @@ from flask import Flask, jsonify
 from flask_migrate import Migrate
 from sqlalchemy import URL
 
-from backend.models import Employee, db
-from backend.seed_data import EMPLOYEE_SEED_DATA
+from backend.models import DataSource, Employee, db
+from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 
 load_dotenv()
 
@@ -54,9 +54,18 @@ def create_app(test_config=None):
 
         return jsonify(employee.to_dict())
 
+    @app.get("/api/data-sources")
+    def get_data_sources():
+        data_sources = db.session.execute(
+            db.select(DataSource).order_by(DataSource.display_name)
+        ).scalars()
+
+        return jsonify([source.to_dict() for source in data_sources])
+
     @app.cli.command("seed-db")
     def seed_db():
-        added_count = 0
+        employee_count = 0
+        data_source_count = 0
 
         for employee_data in EMPLOYEE_SEED_DATA:
             existing_employee = db.session.get(
@@ -66,13 +75,49 @@ def create_app(test_config=None):
 
             if existing_employee is None:
                 db.session.add(Employee(**employee_data))
-                added_count += 1
+                employee_count += 1
+
+        for source_data in DATA_SOURCE_SEED_DATA:
+            existing_source = db.session.get(
+                DataSource,
+                source_data["id"],
+            )
+
+            if existing_source is None:
+                db.session.add(DataSource(**source_data))
+                data_source_count += 1
+
+        db.session.add_all(
+            DataSource(**source_data)
+            for source_data in DATA_SOURCE_SEED_DATA
+        )
 
         db.session.commit()
-        print(f"Added {added_count} employee records.")
+
+        print(
+            f"Added {employee_count} employee records and "
+            f"{data_source_count} data sources."
+        )
 
     return app
 
 
 if __name__ == "__main__":
     create_app().run(debug=True)
+
+def test_data_sources_endpoint(client):
+    response = client.get("/api/data-sources")
+    data_sources = response.get_json()
+
+    assert response.status_code == 200
+    assert len(data_sources) == 4
+    assert {source["provider"] for source in data_sources} == {
+        "google_workspace",
+        "microsoft_graph",
+        "jira",
+        "linear",
+    }
+    assert all(
+        source["status"] == "not_connected"
+        for source in data_sources
+    )

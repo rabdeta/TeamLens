@@ -42,3 +42,26 @@ EMPLOYEE_SEED_DATA = [
         ),
     },
 ]
+
+DATA_SOURCE_SEED_DATA = [
+    {
+        "id": "source-google-workspace",
+        "provider": "google_workspace",
+        "display_name": "Google Workspace",
+    },
+    {
+        "id": "source-microsoft-graph",
+        "provider": "microsoft_graph",
+        "display_name": "Microsoft Graph",
+    },
+    {
+        "id": "source-jira",
+        "provider": "jira",
+        "display_name": "Jira",
+    },
+    {
+        "id": "source-linear",
+        "provider": "linear",
+        "display_name": "Linear",
+    },
+]
