@@ -49,3 +49,36 @@ class Employee(db.Model):
             "dataCoveragePercent": self.data_coverage_percent,
             "lastSyncedAt": self.last_synced_at.isoformat(),
         }
+
+class DataSource(db.Model):
+    __tablename__ = "data_sources"
+
+    id = db.Column(db.String(50), primary_key=True)
+    provider = db.Column(db.String(50), nullable=False, unique=True)
+    display_name = db.Column(db.String(100), nullable=False)
+    status = db.Column(
+        db.String(30),
+        nullable=False,
+        default="not_connected",
+        server_default="not_connected",
+    )
+    last_synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "displayName": self.display_name,
+            "status": self.status,
+            "lastSyncedAt": (
+                self.last_synced_at.isoformat()
+                if self.last_synced_at
+                else None
+            ),
+            "createdAt": self.created_at.isoformat(),
+        }
