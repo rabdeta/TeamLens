@@ -1,7 +1,9 @@
 import os
 
+import secrets
+from urllib.parse import urlencode
 from dotenv import load_dotenv
-from flask import Flask, jsonify
+from flask import Flask, jsonify, redirect, session
 from flask_migrate import Migrate
 from sqlalchemy import URL
 
@@ -17,6 +19,10 @@ def create_app(test_config=None):
     app = Flask(__name__)
 
     if test_config is None:
+        app.config["LINEAR_CLIENT_ID"] = os.environ["LINEAR_CLIENT_ID"]
+        app.config["LINEAR_CLIENT_SECRET"] = os.environ["LINEAR_CLIENT_SECRET"]
+        app.config["LINEAR_REDIRECT_URI"] = os.environ["LINEAR_REDIRECT_URI"]
+        app.config["SECRET_KEY"] = os.environ["FLASK_SECRET_KEY"]
         app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
             drivername="postgresql+psycopg",
             username=os.environ["DB_USER"],
@@ -61,6 +67,24 @@ def create_app(test_config=None):
         ).scalars()
 
         return jsonify([source.to_dict() for source in data_sources])
+
+    @app.get("/api/integrations/linear/connect")
+    def connect_linear():
+        state = secrets.token_urlsafe(32)
+        session["linear_oauth_state"] = state
+
+        query = urlencode(
+            {
+                "client_id": app.config["LINEAR_CLIENT_ID"],
+                "redirect_uri": app.config["LINEAR_REDIRECT_URI"],
+                "response_type": "code",
+                "scope": "read",
+                "actor": "user",
+                "state": state,
+            }
+        )
+
+        return redirect(f"https://linear.app/oauth/authorize?{query}")
 
     @app.cli.command("seed-db")
     def seed_db():

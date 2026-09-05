@@ -1,5 +1,6 @@
 import pytest
 
+from urllib.parse import parse_qs, urlparse
 from backend.app import create_app
 from backend.models import DataSource, Employee, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
@@ -10,7 +11,11 @@ def app():
     test_app = create_app(
         {
             "TESTING": True,
+            "SECRET_KEY": "test-only-secret",
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "LINEAR_CLIENT_ID": "test-client-id",
+            "LINEAR_CLIENT_SECRET": "test-client-secret",
+            "LINEAR_REDIRECT_URI": "http://localhost/test-callback",
         }
     )
 
@@ -98,3 +103,20 @@ def test_data_sources_endpoint(client):
         source["status"] == "not_connected"
         for source in data_sources
     )
+
+
+def test_linear_connect_redirect(client):
+    response = client.get("/api/integrations/linear/connect")
+
+    assert response.status_code == 302
+
+    query = parse_qs(urlparse(response.location).query)
+
+    assert query["client_id"] == ["test-client-id"]
+    assert query["redirect_uri"] == ["http://localhost/test-callback"]
+    assert query["response_type"] == ["code"]
+    assert query["scope"] == ["read"]
+    assert query["actor"] == ["user"]
+
+    with client.session_transaction() as oauth_session:
+        assert query["state"] == [oauth_session["linear_oauth_state"]]
