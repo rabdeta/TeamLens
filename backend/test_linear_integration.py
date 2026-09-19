@@ -7,6 +7,7 @@ from backend.integrations.linear import (
     execute_query,
     get_completed_task_counts,
     get_workspace_members,
+    refresh_oauth_tokens,
 )
 
 @patch("backend.integrations.linear.requests.post")
@@ -139,3 +140,35 @@ def test_completed_task_counts_supports_pagination(mock_execute_query):
     assert "title" not in query
     assert "description" not in query
     assert "comment" not in query
+
+@patch("backend.integrations.linear.requests.post")
+def test_refresh_oauth_tokens_returns_rotated_tokens(mock_post):
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 86400,
+    }
+    mock_post.return_value = response
+
+    token_data = refresh_oauth_tokens(
+        "old-refresh-token",
+        "test-client-id",
+        "test-client-secret",
+    )
+
+    assert token_data == {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 86400,
+    }
+
+    request_data = mock_post.call_args.kwargs["data"]
+
+    assert request_data == {
+        "refresh_token": "old-refresh-token",
+        "grant_type": "refresh_token",
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+    }

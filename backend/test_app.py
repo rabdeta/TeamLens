@@ -1,5 +1,6 @@
 import pytest
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock, patch
 from cryptography.fernet import Fernet
 from urllib.parse import parse_qs, urlparse
@@ -272,3 +273,76 @@ def test_linear_members_returns_safe_metadata(client, app):
     mock_get_task_counts.assert_called_once_with(
         "test-access-token"
     )
+
+def test_linear_members_refreshes_expired_tokens(client, app):
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        linear_source.status = "connected"
+        linear_source.access_token_encrypted = encryption.encrypt(
+            b"expired-access-token"
+        ).decode()
+        linear_source.refresh_token_encrypted = encryption.encrypt(
+            b"old-refresh-token"
+        ).decode()
+        linear_source.token_expires_at = (
+            datetime.now(timezone.utc) - timedelta(minutes=1)
+        )
+        db.session.commit()
+
+    with (
+        patch(
+            "backend.app.refresh_oauth_tokens",
+            return_value={
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "expires_in": 86400,
+            },
+        ) as mock_refresh,
+        patch(
+            "backend.app.get_workspace_members",
+            return_value=[],
+        ),
+        patch(
+            "backend.app.get_completed_task_counts",
+            return_value={},
+        ),
+    ):
+        response = client.get(
+            "/api/integrations/linear/members"
+        )
+
+    assert response.status_code == 200
+
+    mock_refresh.assert_called_once_with(
+        "old-refresh-token",
+        "test-client-id",
+        "test-client-secret",
+    )
+
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        assert encryption.decrypt(
+            linear_source.access_token_encrypted.encode()
+        ).decode() == "new-access-token"
+
+        assert encryption.decrypt(
+            linear_source.refresh_token_encrypted.encode()
+        ).decode() == "new-refresh-token"

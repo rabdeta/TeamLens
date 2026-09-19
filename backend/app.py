@@ -15,6 +15,7 @@ from backend.integrations.linear import (
     LinearAPIError,
     get_completed_task_counts,
     get_workspace_members,
+    refresh_oauth_tokens,
 )
 
 load_dotenv()
@@ -189,6 +190,59 @@ def create_app(test_config=None):
         except InvalidToken:
             return jsonify(error="Stored Linear token is invalid"), 500
 
+        expires_at = linear_source.token_expires_at
+
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+        token_needs_refresh = (
+            expires_at is not None
+            and expires_at
+            <= datetime.now(timezone.utc) + timedelta(minutes=5)
+        )
+
+        if token_needs_refresh:
+            if not linear_source.refresh_token_encrypted:
+                return jsonify(
+                    error="Linear must be reconnected"
+                ), 409
+
+            try:
+                refresh_token = encryption.decrypt(
+                    linear_source.refresh_token_encrypted.encode()
+                ).decode()
+
+                token_data = refresh_oauth_tokens(
+                    refresh_token,
+                    app.config["LINEAR_CLIENT_ID"],
+                    app.config["LINEAR_CLIENT_SECRET"],
+                )
+            except InvalidToken:
+                return jsonify(
+                    error="Stored Linear token is invalid"
+                ), 500
+            except LinearAPIError:
+                return jsonify(
+                    error="Unable to refresh Linear connection"
+                ), 502
+
+            access_token = token_data["access_token"]
+
+            linear_source.access_token_encrypted = encryption.encrypt(
+                access_token.encode()
+            ).decode()
+            linear_source.refresh_token_encrypted = encryption.encrypt(
+                token_data["refresh_token"].encode()
+            ).decode()
+            linear_source.token_expires_at = (
+                datetime.now(timezone.utc)
+                + timedelta(
+                    seconds=int(token_data["expires_in"])
+                )
+            )
+
+            db.session.commit()
+
         try:
             members = get_workspace_members(access_token)
             task_counts = get_completed_task_counts(access_token)
@@ -238,10 +292,7 @@ def create_app(test_config=None):
                 db.session.add(DataSource(**source_data))
                 data_source_count += 1
 
-        db.session.add_all(
-            DataSource(**source_data)
-            for source_data in DATA_SOURCE_SEED_DATA
-        )
+        
 
         db.session.commit()
 
@@ -255,20 +306,3 @@ def create_app(test_config=None):
 
 if __name__ == "__main__":
     create_app().run(debug=True)
-
-def test_data_sources_endpoint(client):
-    response = client.get("/api/data-sources")
-    data_sources = response.get_json()
-
-    assert response.status_code == 200
-    assert len(data_sources) == 4
-    assert {source["provider"] for source in data_sources} == {
-        "google_workspace",
-        "microsoft_graph",
-        "jira",
-        "linear",
-    }
-    assert all(
-        source["status"] == "not_connected"
-        for source in data_sources
-    )

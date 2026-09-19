@@ -3,6 +3,7 @@ import requests
 
 LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
+LINEAR_OAUTH_TOKEN_URL = "https://api.linear.app/oauth/token"
 
 class LinearAPIError(Exception):
     """Raised when Linear cannot return valid API data."""
@@ -38,6 +39,40 @@ def execute_query(access_token, query, variables=None):
         raise LinearAPIError("Linear returned an invalid response")
 
     return data
+
+def refresh_oauth_tokens(
+    refresh_token,
+    client_id,
+    client_secret,
+):
+    try:
+        response = requests.post(
+            LINEAR_OAUTH_TOKEN_URL,
+            data={
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        token_data = response.json()
+    except (requests.RequestException, ValueError) as error:
+        raise LinearAPIError(
+            "Unable to refresh Linear access token"
+        ) from error
+
+    if (
+        not token_data.get("access_token")
+        or not token_data.get("refresh_token")
+        or not token_data.get("expires_in")
+    ):
+        raise LinearAPIError(
+            "Linear returned an invalid refresh response"
+        )
+
+    return token_data
 
 WORKSPACE_MEMBERS_QUERY = """
 query WorkspaceMembers {
