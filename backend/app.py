@@ -263,10 +263,14 @@ def create_app(test_config=None):
             for member in members
         ]
 
+        linear_source.last_synced_at = datetime.now(timezone.utc)
+        db.session.commit()
+
         return jsonify(
             members=member_metrics,
             count=len(member_metrics),
         )
+
     @app.cli.command("seed-db")
     def seed_db():
         employee_count = 0

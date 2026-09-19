@@ -274,6 +274,15 @@ def test_linear_members_returns_safe_metadata(client, app):
         "test-access-token"
     )
 
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        assert linear_source.last_synced_at is not None
+
 def test_linear_members_refreshes_expired_tokens(client, app):
     with app.app_context():
         linear_source = db.session.execute(
