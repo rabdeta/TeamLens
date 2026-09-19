@@ -74,8 +74,8 @@ class DataSource(db.Model):
     token_expires_at = db.Column(
         db.DateTime(timezone=True),
         nullable=True,
-    )    
-
+    )
+    
     def to_dict(self):
         return {
             "id": self.id,

@@ -1,5 +1,7 @@
 import pytest
 
+from unittest.mock import Mock, patch
+from cryptography.fernet import Fernet
 from urllib.parse import parse_qs, urlparse
 from backend.app import create_app
 from backend.models import DataSource, Employee, db
@@ -16,6 +18,7 @@ def app():
             "LINEAR_CLIENT_ID": "test-client-id",
             "LINEAR_CLIENT_SECRET": "test-client-secret",
             "LINEAR_REDIRECT_URI": "http://localhost/test-callback",
+            "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
         }
     )
 
@@ -120,3 +123,70 @@ def test_linear_connect_redirect(client):
 
     with client.session_transaction() as oauth_session:
         assert query["state"] == [oauth_session["linear_oauth_state"]]
+
+
+def test_linear_callback_rejects_invalid_state(client):
+    response = client.get(
+        "/api/integrations/linear/callback",
+        query_string={
+            "code": "temporary-code",
+            "state": "invalid-state",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Invalid OAuth callback"
+    }
+
+def test_linear_callback_stores_encrypted_tokens(client, app):
+    client.get("/api/integrations/linear/connect")
+
+    with client.session_transaction() as oauth_session:
+        state = oauth_session["linear_oauth_state"]
+
+    token_response = Mock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "test-access-token",
+        "refresh_token": "test-refresh-token",
+        "expires_in": 86400,
+    }
+
+    with patch(
+        "backend.app.requests.post",
+        return_value=token_response,
+    ):
+        response = client.get(
+            "/api/integrations/linear/callback",
+            query_string={
+                "code": "temporary-code",
+                "state": state,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "status": "connected",
+        "provider": "linear",
+    }
+
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        assert linear_source.status == "connected"
+        assert encryption.decrypt(
+            linear_source.access_token_encrypted.encode()
+        ).decode() == "test-access-token"
+        assert encryption.decrypt(
+            linear_source.refresh_token_encrypted.encode()
+        ).decode() == "test-refresh-token"
+        assert linear_source.token_expires_at is not None

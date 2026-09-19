@@ -3,9 +3,12 @@ import os
 import secrets
 from urllib.parse import urlencode
 from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, session
+from flask import Flask, jsonify, redirect, request, session
 from flask_migrate import Migrate
 from sqlalchemy import URL
+from datetime import datetime, timedelta, timezone
+import requests
+from cryptography.fernet import Fernet
 
 from backend.models import DataSource, Employee, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
@@ -19,6 +22,9 @@ def create_app(test_config=None):
     app = Flask(__name__)
 
     if test_config is None:
+        app.config["TOKEN_ENCRYPTION_KEY"] = os.environ[
+            "TOKEN_ENCRYPTION_KEY"
+        ]        
         app.config["LINEAR_CLIENT_ID"] = os.environ["LINEAR_CLIENT_ID"]
         app.config["LINEAR_CLIENT_SECRET"] = os.environ["LINEAR_CLIENT_SECRET"]
         app.config["LINEAR_REDIRECT_URI"] = os.environ["LINEAR_REDIRECT_URI"]
@@ -85,6 +91,73 @@ def create_app(test_config=None):
         )
 
         return redirect(f"https://linear.app/oauth/authorize?{query}")
+
+    @app.get("/api/integrations/linear/callback")
+    def linear_callback():
+        authorization_code = request.args.get("code")
+        returned_state = request.args.get("state")
+        expected_state = session.pop("linear_oauth_state", None)
+
+        if (
+            not authorization_code
+            or not returned_state
+            or not expected_state
+            or not secrets.compare_digest(returned_state, expected_state)
+        ):
+            return jsonify(error="Invalid OAuth callback"), 400
+
+        try:
+            token_response = requests.post(
+                "https://api.linear.app/oauth/token",
+                data={
+                    "code": authorization_code,
+                    "redirect_uri": app.config["LINEAR_REDIRECT_URI"],
+                    "client_id": app.config["LINEAR_CLIENT_ID"],
+                    "client_secret": app.config["LINEAR_CLIENT_SECRET"],
+                    "grant_type": "authorization_code",
+                },
+                timeout=10,
+            )
+            token_response.raise_for_status()
+            token_data = token_response.json()
+        except requests.RequestException:
+            return jsonify(error="Unable to connect to Linear"), 502
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in")
+
+        if not access_token or not refresh_token or not expires_in:
+            return jsonify(error="Linear returned an invalid token response"), 502
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one_or_none()
+
+        if linear_source is None:
+            return jsonify(error="Linear data source not found"), 404
+
+        linear_source.access_token_encrypted = encryption.encrypt(
+            access_token.encode()
+        ).decode()
+        linear_source.refresh_token_encrypted = encryption.encrypt(
+            refresh_token.encode()
+        ).decode()
+        linear_source.token_expires_at = (
+            datetime.now(timezone.utc)
+            + timedelta(seconds=int(expires_in))
+        )
+        linear_source.status = "connected"
+
+        db.session.commit()
+
+        return jsonify(status="connected", provider="linear")
 
     @app.cli.command("seed-db")
     def seed_db():
