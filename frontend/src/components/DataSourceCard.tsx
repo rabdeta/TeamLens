@@ -2,10 +2,24 @@ import type { DataSource } from '../types/dataSource'
 
 type DataSourceCardProps = {
   source: DataSource
+  onConnect: (provider: string) => void
 }
 
-function DataSourceCard({ source }: DataSourceCardProps) {
+function DataSourceCard({
+  source,
+  onConnect,
+}: DataSourceCardProps) {
   const statusLabel = source.status.replace('_', ' ')
+  const isConnected = source.status === 'connected'
+  const canConnect = source.provider === 'linear' && !isConnected
+
+  let buttonLabel = 'Coming soon'
+
+  if (isConnected) {
+    buttonLabel = 'Connected'
+  } else if (canConnect) {
+    buttonLabel = 'Connect'
+  }
 
   return (
     <article className="data-source-card">
@@ -16,8 +30,12 @@ function DataSourceCard({ source }: DataSourceCardProps) {
         </p>
       </div>
 
-      <button type="button" disabled>
-        Connect
+      <button
+        type="button"
+        disabled={!canConnect}
+        onClick={() => onConnect(source.provider)}
+      >
+        {buttonLabel}
       </button>
     </article>
   )

@@ -42,7 +42,7 @@ function App() {
     loadEmployees()
   }, [])
 
-    useEffect(() => {
+  useEffect(() => {
     const loadDataSources = async () => {
       try {
         const response = await fetch('/api/data-sources')
@@ -87,6 +87,14 @@ function App() {
       )
     } finally {
       setIsDetailLoading(false)
+    }
+  }
+
+  const handleConnectDataSource = (provider: string) => {
+    if (provider === 'linear') {
+      window.location.assign(
+        'http://127.0.0.1:5000/api/integrations/linear/connect',
+      )
     }
   }
 
@@ -159,7 +167,11 @@ function App() {
 
         <div className="data-source-grid">
           {dataSources.map((source) => (
-            <DataSourceCard key={source.id} source={source} />
+            <DataSourceCard
+              key={source.id}
+              source={source}
+              onConnect={handleConnectDataSource}
+            />
           ))}
         </div>
       </section>
