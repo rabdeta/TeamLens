@@ -292,7 +292,7 @@ def create_app(test_config=None):
                 db.session.add(DataSource(**source_data))
                 data_source_count += 1
 
-        
+
 
         db.session.commit()
 
