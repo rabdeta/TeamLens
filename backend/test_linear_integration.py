@@ -1,0 +1,174 @@
+from unittest.mock import Mock, patch
+
+import pytest
+
+from backend.integrations.linear import (
+    LinearAPIError,
+    execute_query,
+    get_completed_task_counts,
+    get_workspace_members,
+    refresh_oauth_tokens,
+)
+
+@patch("backend.integrations.linear.requests.post")
+def test_execute_query_returns_data(mock_post):
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "data": {
+            "viewer": {
+                "id": "linear-user-1",
+            }
+        }
+    }
+    mock_post.return_value = response
+
+    data = execute_query(
+        "test-access-token",
+        "query { viewer { id } }",
+    )
+
+    assert data == {"viewer": {"id": "linear-user-1"}}
+
+    request_headers = mock_post.call_args.kwargs["headers"]
+    assert request_headers["Authorization"] == "Bearer test-access-token"
+
+
+@patch("backend.integrations.linear.requests.post")
+def test_execute_query_rejects_graphql_errors(mock_post):
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "errors": [{"message": "Request failed"}]
+    }
+    mock_post.return_value = response
+
+    with pytest.raises(LinearAPIError):
+        execute_query(
+            "test-access-token",
+            "query { viewer { id } }",
+        )
+
+@patch("backend.integrations.linear.execute_query")
+def test_get_workspace_members_returns_safe_metadata(mock_execute_query):
+    mock_execute_query.return_value = {
+        "users": {
+            "nodes": [
+                {
+                    "id": "user-1",
+                    "name": "Maya Chen",
+                    "active": True,
+                }
+            ]
+        }
+    }
+
+    members = get_workspace_members("test-access-token")
+
+    assert members == [
+        {
+            "id": "user-1",
+            "name": "Maya Chen",
+            "active": True,
+        }
+    ]
+
+    query = mock_execute_query.call_args.args[1].lower()
+
+    assert "title" not in query
+    assert "description" not in query
+    assert "comment" not in query
+
+@patch("backend.integrations.linear.execute_query")
+def test_completed_task_counts_supports_pagination(mock_execute_query):
+    mock_execute_query.side_effect = [
+        {
+            "issues": {
+                "nodes": [
+                    {
+                        "completedAt": "2026-09-10T12:00:00Z",
+                        "assignee": {"id": "user-1"},
+                    },
+                    {
+                        "completedAt": "2026-09-11T12:00:00Z",
+                        "assignee": {"id": "user-1"},
+                    },
+                    {
+                        "completedAt": "2026-09-12T12:00:00Z",
+                        "assignee": None,
+                    },
+                ],
+                "pageInfo": {
+                    "hasNextPage": True,
+                    "endCursor": "next-page",
+                },
+            }
+        },
+        {
+            "issues": {
+                "nodes": [
+                    {
+                        "completedAt": "2026-09-13T12:00:00Z",
+                        "assignee": {"id": "user-2"},
+                    }
+                ],
+                "pageInfo": {
+                    "hasNextPage": False,
+                    "endCursor": None,
+                },
+            }
+        },
+    ]
+
+    task_counts = get_completed_task_counts(
+        "test-access-token"
+    )
+
+    assert task_counts == {
+        "user-1": 2,
+        "user-2": 1,
+    }
+    assert mock_execute_query.call_count == 2
+    assert mock_execute_query.call_args_list[0].args[2] == {
+        "after": None
+    }
+    assert mock_execute_query.call_args_list[1].args[2] == {
+        "after": "next-page"
+    }
+
+    query = mock_execute_query.call_args_list[0].args[1].lower()
+    assert "title" not in query
+    assert "description" not in query
+    assert "comment" not in query
+
+@patch("backend.integrations.linear.requests.post")
+def test_refresh_oauth_tokens_returns_rotated_tokens(mock_post):
+    response = Mock()
+    response.raise_for_status.return_value = None
+    response.json.return_value = {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 86400,
+    }
+    mock_post.return_value = response
+
+    token_data = refresh_oauth_tokens(
+        "old-refresh-token",
+        "test-client-id",
+        "test-client-secret",
+    )
+
+    assert token_data == {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 86400,
+    }
+
+    request_data = mock_post.call_args.kwargs["data"]
+
+    assert request_data == {
+        "refresh_token": "old-refresh-token",
+        "grant_type": "refresh_token",
+        "client_id": "test-client-id",
+        "client_secret": "test-client-secret",
+    }

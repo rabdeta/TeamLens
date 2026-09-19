@@ -206,3 +206,45 @@ button:hover {
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+.linear-metrics {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid #c7d2fe;
+  border-radius: 16px;
+  background: #eef2ff;
+}
+
+.linear-metrics h3 {
+  margin: 0 0 8px;
+}
+
+.linear-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-top: 20px;
+}
+
+.linear-metrics-grid article {
+  padding: 18px;
+  border: 1px solid #dce2ec;
+  border-radius: 12px;
+  background: white;
+}
+
+.linear-metrics-grid h4 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.linear-metrics-grid p {
+  margin: 6px 0 0;
+}
+
+@media (max-width: 700px) {
+  .data-source-grid,
+  .linear-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}

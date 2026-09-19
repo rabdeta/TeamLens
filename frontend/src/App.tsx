@@ -4,6 +4,7 @@ import EmployeeCard from './components/EmployeeCard'
 import type { EmployeeProfile } from './types/employee'
 import DataSourceCard from './components/DataSourceCard'
 import type { DataSource } from './types/dataSource'
+import type { LinearMetricsResponse } from './types/linear'
 
 function App() {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([])
@@ -16,6 +17,10 @@ function App() {
   const [detailError, setDetailError] = useState('')
   const [dataSources, setDataSources] = useState<DataSource[]>([])
   const [dataSourcesError, setDataSourcesError] = useState('')
+  const [linearMetrics, setLinearMetrics] =
+    useState<LinearMetricsResponse | null>(null)
+  const [isLinearSyncing, setIsLinearSyncing] = useState(false)
+  const [linearSyncError, setLinearSyncError] = useState('')
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -42,7 +47,7 @@ function App() {
     loadEmployees()
   }, [])
 
-    useEffect(() => {
+  useEffect(() => {
     const loadDataSources = async () => {
       try {
         const response = await fetch('/api/data-sources')
@@ -87,6 +92,40 @@ function App() {
       )
     } finally {
       setIsDetailLoading(false)
+    }
+  }
+
+  const handleConnectDataSource = (provider: string) => {
+    if (provider === 'linear') {
+      window.location.assign(
+        'http://127.0.0.1:5000/api/integrations/linear/connect',
+      )
+    }
+  }
+
+  const handleSyncLinear = async () => {
+    setIsLinearSyncing(true)
+    setLinearSyncError('')
+
+    try {
+      const response = await fetch(
+        '/api/integrations/linear/members',
+      )
+
+      if (!response.ok) {
+        throw new Error('Failed to sync Linear metadata')
+      }
+
+      const data: LinearMetricsResponse = await response.json()
+      setLinearMetrics(data)
+    } catch (caughtError) {
+      setLinearSyncError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'An unexpected error occurred',
+      )
+    } finally {
+      setIsLinearSyncing(false)
     }
   }
 
@@ -159,9 +198,40 @@ function App() {
 
         <div className="data-source-grid">
           {dataSources.map((source) => (
-            <DataSourceCard key={source.id} source={source} />
+            <DataSourceCard
+              key={source.id}
+              source={source}
+              onConnect={handleConnectDataSource}
+              onSync={handleSyncLinear}
+              isSyncing={isLinearSyncing}
+            />
           ))}
         </div>
+        {linearSyncError && (
+          <p role="alert">{linearSyncError}</p>
+        )}
+
+        {linearMetrics && (
+          <div className="linear-metrics">
+            <h3>Linear metadata summary</h3>
+            <p>
+              {linearMetrics.count} workspace members synchronized.
+            </p>
+
+            <div className="linear-metrics-grid">
+              {linearMetrics.members.map((member) => (
+                <article key={member.id}>
+                  <h4>{member.name}</h4>
+                  <p>{member.active ? 'Active' : 'Inactive'}</p>
+                  <p>
+                    {member.tasksCompleted} tasks completed over the
+                    last {member.measurementPeriodDays} days
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {isDetailLoading && <p>Loading employee details…</p>}

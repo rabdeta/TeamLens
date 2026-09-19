@@ -1,5 +1,9 @@
 import pytest
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock, patch
+from cryptography.fernet import Fernet
+from urllib.parse import parse_qs, urlparse
 from backend.app import create_app
 from backend.models import DataSource, Employee, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
@@ -10,7 +14,13 @@ def app():
     test_app = create_app(
         {
             "TESTING": True,
+            "SECRET_KEY": "test-only-secret",
             "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "LINEAR_CLIENT_ID": "test-client-id",
+            "LINEAR_CLIENT_SECRET": "test-client-secret",
+            "LINEAR_REDIRECT_URI": "http://localhost/test-callback",
+            "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
+            "FRONTEND_URL": "http://localhost:5173",
         }
     )
 
@@ -98,3 +108,250 @@ def test_data_sources_endpoint(client):
         source["status"] == "not_connected"
         for source in data_sources
     )
+
+
+def test_linear_connect_redirect(client):
+    response = client.get("/api/integrations/linear/connect")
+
+    assert response.status_code == 302
+
+    query = parse_qs(urlparse(response.location).query)
+
+    assert query["client_id"] == ["test-client-id"]
+    assert query["redirect_uri"] == ["http://localhost/test-callback"]
+    assert query["response_type"] == ["code"]
+    assert query["scope"] == ["read"]
+    assert query["actor"] == ["user"]
+
+    with client.session_transaction() as oauth_session:
+        assert query["state"] == [oauth_session["linear_oauth_state"]]
+
+
+def test_linear_callback_rejects_invalid_state(client):
+    response = client.get(
+        "/api/integrations/linear/callback",
+        query_string={
+            "code": "temporary-code",
+            "state": "invalid-state",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Invalid OAuth callback"
+    }
+
+def test_linear_callback_stores_encrypted_tokens(client, app):
+    client.get("/api/integrations/linear/connect")
+
+    with client.session_transaction() as oauth_session:
+        state = oauth_session["linear_oauth_state"]
+
+    token_response = Mock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "test-access-token",
+        "refresh_token": "test-refresh-token",
+        "expires_in": 86400,
+    }
+
+    with patch(
+        "backend.app.requests.post",
+        return_value=token_response,
+    ):
+        response = client.get(
+            "/api/integrations/linear/callback",
+            query_string={
+                "code": "temporary-code",
+                "state": state,
+            },
+        )
+
+    assert response.status_code == 302
+    assert response.location == (
+        "http://localhost:5173/?linear=connected"
+    )
+
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        assert linear_source.status == "connected"
+        assert encryption.decrypt(
+            linear_source.access_token_encrypted.encode()
+        ).decode() == "test-access-token"
+        assert encryption.decrypt(
+            linear_source.refresh_token_encrypted.encode()
+        ).decode() == "test-refresh-token"
+        assert linear_source.token_expires_at is not None
+
+def test_linear_members_requires_connection(client):
+    response = client.get("/api/integrations/linear/members")
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "Linear is not connected"
+    }
+
+
+def test_linear_members_returns_safe_metadata(client, app):
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        linear_source.status = "connected"
+        linear_source.access_token_encrypted = encryption.encrypt(
+            b"test-access-token"
+        ).decode()
+        db.session.commit()
+
+    linear_members = [
+        {
+            "id": "user-1",
+            "name": "Maya Chen",
+            "active": True,
+        },
+        {
+            "id": "user-2",
+            "name": "Jordan Rivera",
+            "active": True,
+        },
+    ]
+
+    with (
+        patch(
+            "backend.app.get_workspace_members",
+            return_value=linear_members,
+        ) as mock_get_members,
+        patch(
+            "backend.app.get_completed_task_counts",
+            return_value={"user-1": 3},
+        ) as mock_get_task_counts,
+    ):
+        response = client.get(
+            "/api/integrations/linear/members"
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "members": [
+            {
+                "id": "user-1",
+                "name": "Maya Chen",
+                "active": True,
+                "tasksCompleted": 3,
+                "measurementPeriodDays": 30,
+            },
+            {
+                "id": "user-2",
+                "name": "Jordan Rivera",
+                "active": True,
+                "tasksCompleted": 0,
+                "measurementPeriodDays": 30,
+            },
+        ],
+        "count": 2,
+    }
+
+    mock_get_members.assert_called_once_with(
+        "test-access-token"
+    )
+    mock_get_task_counts.assert_called_once_with(
+        "test-access-token"
+    )
+
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        assert linear_source.last_synced_at is not None
+
+def test_linear_members_refreshes_expired_tokens(client, app):
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        linear_source.status = "connected"
+        linear_source.access_token_encrypted = encryption.encrypt(
+            b"expired-access-token"
+        ).decode()
+        linear_source.refresh_token_encrypted = encryption.encrypt(
+            b"old-refresh-token"
+        ).decode()
+        linear_source.token_expires_at = (
+            datetime.now(timezone.utc) - timedelta(minutes=1)
+        )
+        db.session.commit()
+
+    with (
+        patch(
+            "backend.app.refresh_oauth_tokens",
+            return_value={
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "expires_in": 86400,
+            },
+        ) as mock_refresh,
+        patch(
+            "backend.app.get_workspace_members",
+            return_value=[],
+        ),
+        patch(
+            "backend.app.get_completed_task_counts",
+            return_value={},
+        ),
+    ):
+        response = client.get(
+            "/api/integrations/linear/members"
+        )
+
+    assert response.status_code == 200
+
+    mock_refresh.assert_called_once_with(
+        "old-refresh-token",
+        "test-client-id",
+        "test-client-secret",
+    )
+
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        assert encryption.decrypt(
+            linear_source.access_token_encrypted.encode()
+        ).decode() == "new-access-token"
+
+        assert encryption.decrypt(
+            linear_source.refresh_token_encrypted.encode()
+        ).decode() == "new-refresh-token"

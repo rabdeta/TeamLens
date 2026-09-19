@@ -69,6 +69,13 @@ class DataSource(db.Model):
         server_default=db.func.now(),
     )
 
+    access_token_encrypted = db.Column(db.Text, nullable=True)
+    refresh_token_encrypted = db.Column(db.Text, nullable=True)
+    token_expires_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=True,
+    )
+    
     def to_dict(self):
         return {
             "id": self.id,
