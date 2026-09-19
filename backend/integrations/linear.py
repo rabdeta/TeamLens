@@ -67,3 +67,78 @@ def get_workspace_members(access_token):
         )
 
     return members
+
+COMPLETED_ISSUE_METADATA_QUERY = """
+query CompletedIssueMetadata($after: String) {
+  issues(
+    first: 100
+    after: $after
+    filter: {
+      completedAt: { gt: "-P30D" }
+    }
+  ) {
+    nodes {
+      completedAt
+      assignee {
+        id
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+"""
+
+def get_completed_task_counts(access_token):
+    task_counts = {}
+    after = None
+
+    while True:
+        data = execute_query(
+            access_token,
+            COMPLETED_ISSUE_METADATA_QUERY,
+            {"after": after},
+        )
+
+        issues = data.get("issues")
+
+        if not isinstance(issues, dict):
+            raise LinearAPIError(
+                "Linear returned invalid issue metadata"
+            )
+
+        issue_nodes = issues.get("nodes")
+        page_info = issues.get("pageInfo")
+
+        if not isinstance(issue_nodes, list) or not isinstance(
+            page_info,
+            dict,
+        ):
+            raise LinearAPIError(
+                "Linear returned invalid issue metadata"
+            )
+
+        for issue in issue_nodes:
+            assignee = issue.get("assignee")
+
+            if isinstance(assignee, dict):
+                assignee_id = assignee.get("id")
+
+                if isinstance(assignee_id, str):
+                    task_counts[assignee_id] = (
+                        task_counts.get(assignee_id, 0) + 1
+                    )
+
+        if not page_info.get("hasNextPage"):
+            break
+
+        after = page_info.get("endCursor")
+
+        if not isinstance(after, str):
+            raise LinearAPIError(
+                "Linear returned an invalid pagination cursor"
+            )
+
+    return task_counts

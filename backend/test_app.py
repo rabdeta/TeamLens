@@ -218,28 +218,57 @@ def test_linear_members_returns_safe_metadata(client, app):
         ).decode()
         db.session.commit()
 
-    expected_members = [
+    linear_members = [
         {
             "id": "user-1",
             "name": "Maya Chen",
             "active": True,
-        }
+        },
+        {
+            "id": "user-2",
+            "name": "Jordan Rivera",
+            "active": True,
+        },
     ]
 
-    with patch(
-        "backend.app.get_workspace_members",
-        return_value=expected_members,
-    ) as mock_get_members:
+    with (
+        patch(
+            "backend.app.get_workspace_members",
+            return_value=linear_members,
+        ) as mock_get_members,
+        patch(
+            "backend.app.get_completed_task_counts",
+            return_value={"user-1": 3},
+        ) as mock_get_task_counts,
+    ):
         response = client.get(
             "/api/integrations/linear/members"
         )
 
     assert response.status_code == 200
     assert response.get_json() == {
-        "members": expected_members,
-        "count": 1,
+        "members": [
+            {
+                "id": "user-1",
+                "name": "Maya Chen",
+                "active": True,
+                "tasksCompleted": 3,
+                "measurementPeriodDays": 30,
+            },
+            {
+                "id": "user-2",
+                "name": "Jordan Rivera",
+                "active": True,
+                "tasksCompleted": 0,
+                "measurementPeriodDays": 30,
+            },
+        ],
+        "count": 2,
     }
 
     mock_get_members.assert_called_once_with(
+        "test-access-token"
+    )
+    mock_get_task_counts.assert_called_once_with(
         "test-access-token"
     )

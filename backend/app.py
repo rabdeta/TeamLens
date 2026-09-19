@@ -13,6 +13,7 @@ from backend.models import DataSource, Employee, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 from backend.integrations.linear import (
     LinearAPIError,
+    get_completed_task_counts,
     get_workspace_members,
 )
 
@@ -190,14 +191,28 @@ def create_app(test_config=None):
 
         try:
             members = get_workspace_members(access_token)
+            task_counts = get_completed_task_counts(access_token)
         except LinearAPIError:
-            return jsonify(error="Unable to retrieve Linear members"), 502
+            return jsonify(error="Unable to retrieve Linear metadata"), 502
+
+        member_metrics = [
+            {
+                "id": member["id"],
+                "name": member["name"],
+                "active": member["active"],
+                "tasksCompleted": task_counts.get(
+                    member["id"],
+                    0,
+                ),
+                "measurementPeriodDays": 30,
+            }
+            for member in members
+        ]
 
         return jsonify(
-            members=members,
-            count=len(members),
+            members=member_metrics,
+            count=len(member_metrics),
         )
-
     @app.cli.command("seed-db")
     def seed_db():
         employee_count = 0

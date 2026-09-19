@@ -5,6 +5,7 @@ import pytest
 from backend.integrations.linear import (
     LinearAPIError,
     execute_query,
+    get_completed_task_counts,
     get_workspace_members,
 )
 
@@ -73,6 +74,68 @@ def test_get_workspace_members_returns_safe_metadata(mock_execute_query):
 
     query = mock_execute_query.call_args.args[1].lower()
 
+    assert "title" not in query
+    assert "description" not in query
+    assert "comment" not in query
+
+@patch("backend.integrations.linear.execute_query")
+def test_completed_task_counts_supports_pagination(mock_execute_query):
+    mock_execute_query.side_effect = [
+        {
+            "issues": {
+                "nodes": [
+                    {
+                        "completedAt": "2026-09-10T12:00:00Z",
+                        "assignee": {"id": "user-1"},
+                    },
+                    {
+                        "completedAt": "2026-09-11T12:00:00Z",
+                        "assignee": {"id": "user-1"},
+                    },
+                    {
+                        "completedAt": "2026-09-12T12:00:00Z",
+                        "assignee": None,
+                    },
+                ],
+                "pageInfo": {
+                    "hasNextPage": True,
+                    "endCursor": "next-page",
+                },
+            }
+        },
+        {
+            "issues": {
+                "nodes": [
+                    {
+                        "completedAt": "2026-09-13T12:00:00Z",
+                        "assignee": {"id": "user-2"},
+                    }
+                ],
+                "pageInfo": {
+                    "hasNextPage": False,
+                    "endCursor": None,
+                },
+            }
+        },
+    ]
+
+    task_counts = get_completed_task_counts(
+        "test-access-token"
+    )
+
+    assert task_counts == {
+        "user-1": 2,
+        "user-2": 1,
+    }
+    assert mock_execute_query.call_count == 2
+    assert mock_execute_query.call_args_list[0].args[2] == {
+        "after": None
+    }
+    assert mock_execute_query.call_args_list[1].args[2] == {
+        "after": "next-page"
+    }
+
+    query = mock_execute_query.call_args_list[0].args[1].lower()
     assert "title" not in query
     assert "description" not in query
     assert "comment" not in query
