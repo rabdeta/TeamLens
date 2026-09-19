@@ -33,6 +33,7 @@ def create_app(test_config=None):
         app.config["LINEAR_CLIENT_ID"] = os.environ["LINEAR_CLIENT_ID"]
         app.config["LINEAR_CLIENT_SECRET"] = os.environ["LINEAR_CLIENT_SECRET"]
         app.config["LINEAR_REDIRECT_URI"] = os.environ["LINEAR_REDIRECT_URI"]
+        app.config["FRONTEND_URL"] = os.environ["FRONTEND_URL"]
         app.config["SECRET_KEY"] = os.environ["FLASK_SECRET_KEY"]
         app.config["SQLALCHEMY_DATABASE_URI"] = URL.create(
             drivername="postgresql+psycopg",
@@ -162,7 +163,11 @@ def create_app(test_config=None):
 
         db.session.commit()
 
-        return jsonify(status="connected", provider="linear")
+        frontend_url = app.config["FRONTEND_URL"].rstrip("/")
+
+        return redirect(
+            f"{frontend_url}/?linear=connected"
+        )
 
     @app.get("/api/integrations/linear/members")
     def get_linear_members():

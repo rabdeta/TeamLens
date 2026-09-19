@@ -20,6 +20,7 @@ def app():
             "LINEAR_CLIENT_SECRET": "test-client-secret",
             "LINEAR_REDIRECT_URI": "http://localhost/test-callback",
             "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
+            "FRONTEND_URL": "http://localhost:5173",
         }
     )
 
@@ -166,11 +167,10 @@ def test_linear_callback_stores_encrypted_tokens(client, app):
             },
         )
 
-    assert response.status_code == 200
-    assert response.get_json() == {
-        "status": "connected",
-        "provider": "linear",
-    }
+    assert response.status_code == 302
+    assert response.location == (
+        "http://localhost:5173/?linear=connected"
+    )
 
     with app.app_context():
         linear_source = db.session.execute(
