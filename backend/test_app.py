@@ -190,3 +190,56 @@ def test_linear_callback_stores_encrypted_tokens(client, app):
             linear_source.refresh_token_encrypted.encode()
         ).decode() == "test-refresh-token"
         assert linear_source.token_expires_at is not None
+
+def test_linear_members_requires_connection(client):
+    response = client.get("/api/integrations/linear/members")
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "Linear is not connected"
+    }
+
+
+def test_linear_members_returns_safe_metadata(client, app):
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        linear_source.status = "connected"
+        linear_source.access_token_encrypted = encryption.encrypt(
+            b"test-access-token"
+        ).decode()
+        db.session.commit()
+
+    expected_members = [
+        {
+            "id": "user-1",
+            "name": "Maya Chen",
+            "active": True,
+        }
+    ]
+
+    with patch(
+        "backend.app.get_workspace_members",
+        return_value=expected_members,
+    ) as mock_get_members:
+        response = client.get(
+            "/api/integrations/linear/members"
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "members": expected_members,
+        "count": 1,
+    }
+
+    mock_get_members.assert_called_once_with(
+        "test-access-token"
+    )

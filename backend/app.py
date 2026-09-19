@@ -8,10 +8,13 @@ from flask_migrate import Migrate
 from sqlalchemy import URL
 from datetime import datetime, timedelta, timezone
 import requests
-from cryptography.fernet import Fernet
-
+from cryptography.fernet import Fernet, InvalidToken
 from backend.models import DataSource, Employee, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
+from backend.integrations.linear import (
+    LinearAPIError,
+    get_workspace_members,
+)
 
 load_dotenv()
 
@@ -158,6 +161,42 @@ def create_app(test_config=None):
         db.session.commit()
 
         return jsonify(status="connected", provider="linear")
+
+    @app.get("/api/integrations/linear/members")
+    def get_linear_members():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one_or_none()
+
+        if (
+            linear_source is None
+            or linear_source.status != "connected"
+            or not linear_source.access_token_encrypted
+        ):
+            return jsonify(error="Linear is not connected"), 409
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        try:
+            access_token = encryption.decrypt(
+                linear_source.access_token_encrypted.encode()
+            ).decode()
+        except InvalidToken:
+            return jsonify(error="Stored Linear token is invalid"), 500
+
+        try:
+            members = get_workspace_members(access_token)
+        except LinearAPIError:
+            return jsonify(error="Unable to retrieve Linear members"), 502
+
+        return jsonify(
+            members=members,
+            count=len(members),
+        )
 
     @app.cli.command("seed-db")
     def seed_db():

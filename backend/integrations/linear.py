@@ -38,3 +38,32 @@ def execute_query(access_token, query, variables=None):
         raise LinearAPIError("Linear returned an invalid response")
 
     return data
+
+WORKSPACE_MEMBERS_QUERY = """
+query WorkspaceMembers {
+  users(first: 100) {
+    nodes {
+      id
+      name
+      active
+    }
+  }
+}
+"""
+
+
+def get_workspace_members(access_token):
+    data = execute_query(
+        access_token,
+        WORKSPACE_MEMBERS_QUERY,
+    )
+
+    users = data.get("users", {})
+    members = users.get("nodes")
+
+    if not isinstance(members, list):
+        raise LinearAPIError(
+            "Linear returned invalid workspace member data"
+        )
+
+    return members

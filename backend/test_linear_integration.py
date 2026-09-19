@@ -2,8 +2,11 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from backend.integrations.linear import LinearAPIError, execute_query
-
+from backend.integrations.linear import (
+    LinearAPIError,
+    execute_query,
+    get_workspace_members,
+)
 
 @patch("backend.integrations.linear.requests.post")
 def test_execute_query_returns_data(mock_post):
@@ -43,3 +46,33 @@ def test_execute_query_rejects_graphql_errors(mock_post):
             "test-access-token",
             "query { viewer { id } }",
         )
+
+@patch("backend.integrations.linear.execute_query")
+def test_get_workspace_members_returns_safe_metadata(mock_execute_query):
+    mock_execute_query.return_value = {
+        "users": {
+            "nodes": [
+                {
+                    "id": "user-1",
+                    "name": "Maya Chen",
+                    "active": True,
+                }
+            ]
+        }
+    }
+
+    members = get_workspace_members("test-access-token")
+
+    assert members == [
+        {
+            "id": "user-1",
+            "name": "Maya Chen",
+            "active": True,
+        }
+    ]
+
+    query = mock_execute_query.call_args.args[1].lower()
+
+    assert "title" not in query
+    assert "description" not in query
+    assert "comment" not in query
