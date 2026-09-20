@@ -80,6 +80,57 @@ def create_app(test_config=None):
 
         return jsonify([source.to_dict() for source in data_sources])
 
+    @app.get("/api/external-identities")
+    def get_external_identities():
+        identities = db.session.execute(
+            db.select(ExternalIdentity).order_by(
+                ExternalIdentity.display_name
+            )
+        ).scalars()
+
+        return jsonify(
+            [identity.to_dict() for identity in identities]
+        )
+
+    @app.patch(
+        "/api/external-identities/<string:identity_id>"
+    )
+    def update_external_identity(identity_id):
+        identity = db.session.get(
+            ExternalIdentity,
+            identity_id,
+        )
+
+        if identity is None:
+            return jsonify(
+                error="External identity not found"
+            ), 404
+
+        request_data = request.get_json(silent=True) or {}
+
+        if "employeeId" not in request_data:
+            return jsonify(
+                error="employeeId is required"
+            ), 400
+
+        employee_id = request_data["employeeId"]
+
+        if employee_id is not None:
+            employee = db.session.get(
+                Employee,
+                employee_id,
+            )
+
+            if employee is None:
+                return jsonify(
+                    error="Employee not found"
+                ), 404
+
+        identity.employee_id = employee_id
+        db.session.commit()
+
+        return jsonify(identity.to_dict())
+
     @app.get("/api/integrations/linear/connect")
     def connect_linear():
         state = secrets.token_urlsafe(32)

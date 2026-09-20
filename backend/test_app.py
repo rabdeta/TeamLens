@@ -428,3 +428,78 @@ def test_linear_sync_updates_linked_employee(client, app):
         assert employee.tasks_completed == 7
         assert employee.measurement_period_days == 30
         assert employee.last_synced_at is not None
+
+def test_external_identity_listing_linking_and_unlinking(
+    client,
+    app,
+):
+    with app.app_context():
+        db.session.add(
+            ExternalIdentity(
+                id="linear:user-1",
+                data_source_id="source-linear",
+                external_user_id="user-1",
+                display_name="Maya Chen",
+                active=True,
+            )
+        )
+        db.session.commit()
+
+    list_response = client.get(
+        "/api/external-identities"
+    )
+
+    assert list_response.status_code == 200
+    assert len(list_response.get_json()) == 1
+    assert list_response.get_json()[0]["employeeId"] is None
+
+    link_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={"employeeId": "emp-001"},
+    )
+
+    assert link_response.status_code == 200
+    assert link_response.get_json()["employeeId"] == "emp-001"
+
+    unlink_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={"employeeId": None},
+    )
+
+    assert unlink_response.status_code == 200
+    assert unlink_response.get_json()["employeeId"] is None
+
+
+def test_external_identity_link_validation(client, app):
+    missing_identity_response = client.patch(
+        "/api/external-identities/linear:missing",
+        json={"employeeId": "emp-001"},
+    )
+
+    assert missing_identity_response.status_code == 404
+
+    with app.app_context():
+        db.session.add(
+            ExternalIdentity(
+                id="linear:user-1",
+                data_source_id="source-linear",
+                external_user_id="user-1",
+                display_name="Maya Chen",
+                active=True,
+            )
+        )
+        db.session.commit()
+
+    missing_field_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={},
+    )
+
+    assert missing_field_response.status_code == 400
+
+    invalid_employee_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={"employeeId": "does-not-exist"},
+    )
+
+    assert invalid_employee_response.status_code == 404

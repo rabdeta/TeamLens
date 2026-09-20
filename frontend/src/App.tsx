@@ -5,6 +5,7 @@ import type { EmployeeProfile } from './types/employee'
 import DataSourceCard from './components/DataSourceCard'
 import type { DataSource } from './types/dataSource'
 import type { LinearMetricsResponse } from './types/linear'
+import type { ExternalIdentity } from './types/externalIdentity'
 
 function App() {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([])
@@ -21,6 +22,13 @@ function App() {
     useState<LinearMetricsResponse | null>(null)
   const [isLinearSyncing, setIsLinearSyncing] = useState(false)
   const [linearSyncError, setLinearSyncError] = useState('')
+  const [externalIdentities, setExternalIdentities] = useState<
+    ExternalIdentity[]
+  >([])
+  const [identityError, setIdentityError] = useState('')
+  const [linkingIdentityId, setLinkingIdentityId] = useState<
+    string | null
+  >(null)
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -70,6 +78,35 @@ function App() {
     loadDataSources()
   }, [])
 
+  useEffect(() => {
+    const loadExternalIdentities = async () => {
+      try {
+        const response = await fetch(
+          '/api/external-identities',
+        )
+
+        if (!response.ok) {
+          throw new Error(
+            'Failed to load external identities',
+          )
+        }
+
+        const data: ExternalIdentity[] =
+          await response.json()
+
+        setExternalIdentities(data)
+      } catch (caughtError) {
+        setIdentityError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : 'An unexpected error occurred',
+        )
+      }
+    }
+
+    loadExternalIdentities()
+  }, [])
+
   const handleSelectEmployee = async (employeeId: string) => {
     setIsDetailLoading(true)
     setDetailError('')
@@ -117,7 +154,22 @@ function App() {
       }
 
       const data: LinearMetricsResponse = await response.json()
+
+      const identityResponse = await fetch(
+        '/api/external-identities',
+      )
+
+      if (!identityResponse.ok) {
+        throw new Error(
+          'Linear synced, but identities could not be loaded',
+        )
+      }
+
+      const identities: ExternalIdentity[] =
+        await identityResponse.json()
+
       setLinearMetrics(data)
+      setExternalIdentities(identities)
     } catch (caughtError) {
       setLinearSyncError(
         caughtError instanceof Error
@@ -126,6 +178,54 @@ function App() {
       )
     } finally {
       setIsLinearSyncing(false)
+    }
+  }
+
+  const handleLinkIdentity = async (
+    identityId: string,
+    employeeId: string | null,
+  ) => {
+    setLinkingIdentityId(identityId)
+    setIdentityError('')
+
+    try {
+      const response = await fetch(
+        `/api/external-identities/${encodeURIComponent(identityId)}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            employeeId,
+          }),
+        },
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          'Failed to update employee link',
+        )
+      }
+
+      const updatedIdentity: ExternalIdentity =
+        await response.json()
+
+      setExternalIdentities((currentIdentities) =>
+        currentIdentities.map((identity) =>
+          identity.id === updatedIdentity.id
+            ? updatedIdentity
+            : identity,
+        ),
+      )
+    } catch (caughtError) {
+      setIdentityError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'An unexpected error occurred',
+      )
+    } finally {
+      setLinkingIdentityId(null)
     }
   }
 
@@ -232,6 +332,53 @@ function App() {
             </div>
           </div>
         )}
+
+        {identityError && (
+          <p role="alert">{identityError}</p>
+        )}
+
+        {externalIdentities.length > 0 && (
+          <div className="identity-links">
+            <h3>Link Linear members to employee profiles</h3>
+            <p>
+              Links are explicit to avoid matching employees by
+              name.
+            </p>
+
+            <div className="identity-link-grid">
+              {externalIdentities.map((identity) => (
+                <label key={identity.id}>
+                  <span>{identity.displayName}</span>
+
+                  <select
+                    value={identity.employeeId ?? ''}
+                    disabled={
+                      linkingIdentityId === identity.id
+                    }
+                    onChange={(event) =>
+                      handleLinkIdentity(
+                        identity.id,
+                        event.target.value || null,
+                      )
+                    }
+                  >
+                    <option value="">Not linked</option>
+
+                    {employees.map((employee) => (
+                      <option
+                        key={employee.id}
+                        value={employee.id}
+                      >
+                        {employee.name} — {employee.role}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
       </section>
 
       {isDetailLoading && <p>Loading employee details…</p>}
