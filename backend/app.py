@@ -9,7 +9,7 @@ from sqlalchemy import URL
 from datetime import datetime, timedelta, timezone
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from backend.models import DataSource, Employee, db
+from backend.models import DataSource, Employee, ExternalIdentity, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 from backend.integrations.linear import (
     LinearAPIError,
@@ -254,6 +254,46 @@ def create_app(test_config=None):
         except LinearAPIError:
             return jsonify(error="Unable to retrieve Linear metadata"), 502
 
+        sync_time = datetime.now(timezone.utc)
+
+        for member in members:
+            external_user_id = member["id"]
+            identity_id = f"linear:{external_user_id}"
+
+            identity = db.session.get(
+                ExternalIdentity,
+                identity_id,
+            )
+
+            if identity is None:
+                identity = ExternalIdentity(
+                    id=identity_id,
+                    data_source_id=linear_source.id,
+                    external_user_id=external_user_id,
+                    display_name=member["name"],
+                    active=member["active"],
+                    last_synced_at=sync_time,
+                )
+                db.session.add(identity)
+            else:
+                identity.display_name = member["name"]
+                identity.active = member["active"]
+                identity.last_synced_at = sync_time
+
+            if identity.employee_id:
+                employee = db.session.get(
+                    Employee,
+                    identity.employee_id,
+                )
+
+                if employee is not None:
+                    employee.tasks_completed = task_counts.get(
+                        external_user_id,
+                        0,
+                    )
+                    employee.measurement_period_days = 30
+                    employee.last_synced_at = sync_time
+
         member_metrics = [
             {
                 "id": member["id"],
@@ -268,7 +308,7 @@ def create_app(test_config=None):
             for member in members
         ]
 
-        linear_source.last_synced_at = datetime.now(timezone.utc)
+        linear_source.last_synced_at = sync_time
         db.session.commit()
 
         return jsonify(
