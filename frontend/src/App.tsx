@@ -168,9 +168,20 @@ function App() {
       const identities: ExternalIdentity[] =
         await identityResponse.json()
 
+      const employeeResponse = await fetch('/api/employees')
+
+      if (!employeeResponse.ok) {
+        throw new Error(
+          'Linear synced, but employee profiles could not be refreshed',
+        )
+      }
+
+      const refreshedEmployees: EmployeeProfile[] =
+        await employeeResponse.json()
+
       setLinearMetrics(data)
       setExternalIdentities(identities)
-    } catch (caughtError) {
+      setEmployees(refreshedEmployees)    } catch (caughtError) {
       setLinearSyncError(
         caughtError instanceof Error
           ? caughtError.message
