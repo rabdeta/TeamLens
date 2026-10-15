@@ -89,3 +89,56 @@ class DataSource(db.Model):
             ),
             "createdAt": self.created_at.isoformat(),
         }
+
+class ExternalIdentity(db.Model):
+    __tablename__ = "external_identities"
+
+    id = db.Column(db.String(150), primary_key=True)
+    employee_id = db.Column(
+        db.String(50),
+        db.ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    data_source_id = db.Column(
+        db.String(50),
+        db.ForeignKey("data_sources.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    external_user_id = db.Column(
+        db.String(100),
+        nullable=False,
+    )
+    display_name = db.Column(
+        db.String(120),
+        nullable=False,
+    )
+    active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    last_synced_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "data_source_id",
+            "external_user_id",
+            name="uq_external_identity_source_user",
+        ),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "employeeId": self.employee_id,
+            "dataSourceId": self.data_source_id,
+            "externalUserId": self.external_user_id,
+            "displayName": self.display_name,
+            "active": self.active,
+            "lastSyncedAt": self.last_synced_at.isoformat(),
+        }

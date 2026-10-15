@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from cryptography.fernet import Fernet
 from urllib.parse import parse_qs, urlparse
 from backend.app import create_app
-from backend.models import DataSource, Employee, db
+from backend.models import DataSource, Employee, ExternalIdentity, db
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 
 
@@ -283,6 +283,21 @@ def test_linear_members_returns_safe_metadata(client, app):
 
         assert linear_source.last_synced_at is not None
 
+        identities = db.session.execute(
+            db.select(ExternalIdentity).order_by(
+                ExternalIdentity.external_user_id
+            )
+        ).scalars().all()
+
+        assert len(identities) == 2
+        assert identities[0].external_user_id == "user-1"
+        assert identities[0].display_name == "Maya Chen"
+        assert identities[0].active is True
+        assert identities[0].employee_id is None
+        assert identities[1].external_user_id == "user-2"
+        assert identities[1].display_name == "Jordan Rivera"
+        assert identities[1].employee_id is None
+
 def test_linear_members_refreshes_expired_tokens(client, app):
     with app.app_context():
         linear_source = db.session.execute(
@@ -355,3 +370,182 @@ def test_linear_members_refreshes_expired_tokens(client, app):
         assert encryption.decrypt(
             linear_source.refresh_token_encrypted.encode()
         ).decode() == "new-refresh-token"
+
+def test_linear_sync_updates_linked_employee(client, app):
+    with app.app_context():
+        linear_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "linear"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        linear_source.status = "connected"
+        linear_source.access_token_encrypted = encryption.encrypt(
+            b"test-access-token"
+        ).decode()
+
+        db.session.add(
+            ExternalIdentity(
+                id="linear:user-1",
+                employee_id="emp-001",
+                data_source_id=linear_source.id,
+                external_user_id="user-1",
+                display_name="Maya Chen",
+                active=True,
+            )
+        )
+        db.session.commit()
+
+    with (
+        patch(
+            "backend.app.get_workspace_members",
+            return_value=[
+                {
+                    "id": "user-1",
+                    "name": "Maya Chen",
+                    "active": True,
+                }
+            ],
+        ),
+        patch(
+            "backend.app.get_completed_task_counts",
+            return_value={"user-1": 7},
+        ),
+    ):
+        response = client.get(
+            "/api/integrations/linear/members"
+        )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        employee = db.session.get(Employee, "emp-001")
+
+        assert employee.tasks_completed == 7
+        assert employee.measurement_period_days == 30
+        assert employee.last_synced_at is not None
+
+def test_external_identity_listing_linking_and_unlinking(
+    client,
+    app,
+):
+    with app.app_context():
+        db.session.add(
+            ExternalIdentity(
+                id="linear:user-1",
+                data_source_id="source-linear",
+                external_user_id="user-1",
+                display_name="Maya Chen",
+                active=True,
+            )
+        )
+        db.session.commit()
+
+    list_response = client.get(
+        "/api/external-identities"
+    )
+
+    assert list_response.status_code == 200
+    assert len(list_response.get_json()) == 1
+    assert list_response.get_json()[0]["employeeId"] is None
+
+    link_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={"employeeId": "emp-001"},
+    )
+
+    assert link_response.status_code == 200
+    assert link_response.get_json()["employeeId"] == "emp-001"
+
+    unlink_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={"employeeId": None},
+    )
+
+    assert unlink_response.status_code == 200
+    assert unlink_response.get_json()["employeeId"] is None
+
+
+def test_external_identity_link_validation(client, app):
+    missing_identity_response = client.patch(
+        "/api/external-identities/linear:missing",
+        json={"employeeId": "emp-001"},
+    )
+
+    assert missing_identity_response.status_code == 404
+
+    with app.app_context():
+        db.session.add(
+            ExternalIdentity(
+                id="linear:user-1",
+                data_source_id="source-linear",
+                external_user_id="user-1",
+                display_name="Maya Chen",
+                active=True,
+            )
+        )
+        db.session.commit()
+
+    missing_field_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={},
+    )
+
+    assert missing_field_response.status_code == 400
+
+    invalid_employee_response = client.patch(
+        "/api/external-identities/linear:user-1",
+        json={"employeeId": "does-not-exist"},
+    )
+
+    assert invalid_employee_response.status_code == 404
+
+def test_external_identity_rejects_duplicate_employee_link(
+    client,
+    app,
+):
+    with app.app_context():
+        db.session.add_all(
+            [
+                ExternalIdentity(
+                    id="linear:user-1",
+                    data_source_id="source-linear",
+                    external_user_id="user-1",
+                    display_name="Linear User One",
+                    active=True,
+                    employee_id="emp-001",
+                ),
+                ExternalIdentity(
+                    id="linear:user-2",
+                    data_source_id="source-linear",
+                    external_user_id="user-2",
+                    display_name="Linear User Two",
+                    active=True,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    response = client.patch(
+        "/api/external-identities/linear:user-2",
+        json={"employeeId": "emp-001"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": (
+            "Employee is already linked to another "
+            "identity from this data source"
+        )
+    }
+
+    with app.app_context():
+        identity = db.session.get(
+            ExternalIdentity,
+            "linear:user-2",
+        )
+        assert identity.employee_id is None
