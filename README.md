@@ -14,6 +14,8 @@ A privacy-focused full-stack employee intelligence platform that generates workp
 - Linear OAuth integration
 - Encrypted OAuth token storage and automatic token refresh
 - Privacy-safe Linear member and completed-task synchronization
+- Explicit mapping between Linear identities and employee profiles
+- Persistence of synchronized task metrics to linked employee profiles
 - Automated backend tests
 
 ## Privacy approach
@@ -29,6 +31,10 @@ The Linear integration currently retrieves:
 - Issue completion timestamp
 
 It does not request issue titles, descriptions, comments, or message content.
+Linear identities are linked explicitly to employee profiles using stable
+external IDs. TeamLens does not automatically match employees by name, and
+it prevents multiple identities from the same data source from linking to
+one employee.
 
 ## Technology stack
 
@@ -128,7 +134,6 @@ python -m pytest backend
 
 ## Planned work
 
-- Persist synchronized Linear metrics to employee profiles
 - Google Workspace integration
 - Microsoft Graph integration
 - Jira integration
