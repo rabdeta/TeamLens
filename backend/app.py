@@ -126,10 +126,30 @@ def create_app(test_config=None):
                     error="Employee not found"
                 ), 404
 
+            existing_link = db.session.execute(
+                db.select(ExternalIdentity).where(
+                    ExternalIdentity.data_source_id
+                    == identity.data_source_id,
+                    ExternalIdentity.employee_id
+                    == employee_id,
+                    ExternalIdentity.id != identity.id,
+                )
+            ).scalar_one_or_none()
+
+            if existing_link is not None:
+                return jsonify(
+                    error=(
+                        "Employee is already linked to another "
+                        "identity from this data source"
+                    )
+                ), 409
+
         identity.employee_id = employee_id
         db.session.commit()
 
         return jsonify(identity.to_dict())
+
+
 
     @app.get("/api/integrations/linear/connect")
     def connect_linear():

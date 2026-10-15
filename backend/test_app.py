@@ -503,3 +503,49 @@ def test_external_identity_link_validation(client, app):
     )
 
     assert invalid_employee_response.status_code == 404
+
+def test_external_identity_rejects_duplicate_employee_link(
+    client,
+    app,
+):
+    with app.app_context():
+        db.session.add_all(
+            [
+                ExternalIdentity(
+                    id="linear:user-1",
+                    data_source_id="source-linear",
+                    external_user_id="user-1",
+                    display_name="Linear User One",
+                    active=True,
+                    employee_id="emp-001",
+                ),
+                ExternalIdentity(
+                    id="linear:user-2",
+                    data_source_id="source-linear",
+                    external_user_id="user-2",
+                    display_name="Linear User Two",
+                    active=True,
+                ),
+            ]
+        )
+        db.session.commit()
+
+    response = client.patch(
+        "/api/external-identities/linear:user-2",
+        json={"employeeId": "emp-001"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": (
+            "Employee is already linked to another "
+            "identity from this data source"
+        )
+    }
+
+    with app.app_context():
+        identity = db.session.get(
+            ExternalIdentity,
+            "linear:user-2",
+        )
+        assert identity.employee_id is None
