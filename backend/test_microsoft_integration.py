@@ -1,13 +1,23 @@
 from unittest.mock import Mock, patch
-
 import pytest
-
 from backend.integrations.microsoft import (
     MicrosoftGraphError,
     execute_query,
     get_current_user,
 )
-
+from backend.integrations.microsoft import (
+    MicrosoftGraphError,
+    execute_query,
+    get_calendar_events,
+    get_current_user,
+)
+from backend.integrations.microsoft import (
+    MicrosoftGraphError,
+    execute_query,
+    get_calendar_events,
+    get_current_user,
+    summarize_calendar_events,
+)
 
 def test_execute_query_returns_data():
     graph_response = Mock()
@@ -84,4 +94,88 @@ def test_get_current_user_returns_safe_metadata():
     assert result == {
         "id": "microsoft-user-1",
         "displayName": "Roba Abdeta",
+    }
+
+def test_get_calendar_events_returns_safe_metadata():
+    with patch(
+        "backend.integrations.microsoft.execute_query",
+        return_value={
+            "value": [
+                {
+                    "subject": "Private meeting title",
+                    "bodyPreview": "Private meeting content",
+                    "start": {
+                        "dateTime": "2026-10-16T13:00:00Z",
+                        "timeZone": "UTC",
+                    },
+                    "end": {
+                        "dateTime": "2026-10-16T13:30:00Z",
+                        "timeZone": "UTC",
+                    },
+                    "isCancelled": False,
+                    "responseStatus": {
+                        "response": "accepted",
+                    },
+                }
+            ]
+        },
+    ) as execute_request:
+        result = get_calendar_events(
+            "test-access-token",
+            "2026-09-17T00:00:00Z",
+            "2026-10-17T00:00:00Z",
+        )
+
+    execute_request.assert_called_once_with(
+        "test-access-token",
+        "/me/calendar/calendarView",
+        params={
+            "startDateTime": "2026-09-17T00:00:00Z",
+            "endDateTime": "2026-10-17T00:00:00Z",
+            "$select": (
+                "start,end,isCancelled,responseStatus"
+            ),
+            "$top": "1000",
+        },
+    )
+
+    assert result == [
+        {
+            "start": "2026-10-16T13:00:00Z",
+            "end": "2026-10-16T13:30:00Z",
+            "isCancelled": False,
+            "response": "accepted",
+        }
+    ]
+
+def test_summarize_calendar_events():
+    result = summarize_calendar_events(
+        [
+            {
+                "start": "2026-10-16T13:00:00Z",
+                "end": "2026-10-16T13:30:00Z",
+                "isCancelled": False,
+                "response": "accepted",
+            },
+            {
+                "start": "2026-10-16T15:00:00Z",
+                "end": "2026-10-16T16:00:00Z",
+                "isCancelled": False,
+                "response": "declined",
+            },
+            {
+                "start": "2026-10-17T13:00:00Z",
+                "end": "2026-10-17T13:30:00Z",
+                "isCancelled": True,
+                "response": "accepted",
+            },
+        ]
+    )
+
+    assert result == {
+        "scheduledMeetingCount": 2,
+        "acceptedMeetingCount": 1,
+        "acceptedMeetingPercent": 50,
+        "scheduledMeetingMinutes": 90,
+        "measurementPeriodDays": 30,
     }

@@ -21,6 +21,13 @@ from backend.integrations.microsoft import (
     MicrosoftGraphError,
     get_current_user,
 )
+from backend.integrations.microsoft import (
+    MicrosoftGraphError,
+    get_calendar_events,
+    get_current_user,
+    summarize_calendar_events,
+)
+
 
 load_dotenv()
 
@@ -373,6 +380,66 @@ def create_app(test_config=None):
 
         return jsonify(profile)
 
+    @app.get(
+        "/api/integrations/microsoft/calendar-metrics"
+    )
+    def get_microsoft_calendar_metrics():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one_or_none()
+
+        if (
+            microsoft_source is None
+            or microsoft_source.status != "connected"
+            or not microsoft_source.access_token_encrypted
+        ):
+            return jsonify(
+                error="Microsoft Graph is not connected"
+            ), 409
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        try:
+            access_token = encryption.decrypt(
+                microsoft_source
+                .access_token_encrypted
+                .encode()
+            ).decode()
+        except InvalidToken:
+            return jsonify(
+                error="Stored Microsoft token is invalid"
+            ), 500
+
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(days=30)
+
+        start_datetime = (
+            start_time.isoformat().replace("+00:00", "Z")
+        )
+        end_datetime = (
+            end_time.isoformat().replace("+00:00", "Z")
+        )
+
+        try:
+            events = get_calendar_events(
+                access_token,
+                start_datetime,
+                end_datetime,
+            )
+            summary = summarize_calendar_events(events)
+        except MicrosoftGraphError:
+            return jsonify(
+                error=(
+                    "Unable to retrieve Microsoft "
+                    "calendar metadata"
+                )
+            ), 502
+
+        return jsonify(summary)
 
     @app.get("/api/integrations/linear/callback")
     def linear_callback():

@@ -713,3 +713,57 @@ def test_microsoft_profile_requires_connection(
     assert response.get_json() == {
         "error": "Microsoft Graph is not connected"
     }
+
+def test_microsoft_calendar_metrics_returns_summary(
+    client,
+    app,
+):
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        microsoft_source.status = "connected"
+        microsoft_source.access_token_encrypted = (
+            encryption.encrypt(
+                b"test-microsoft-access-token"
+            ).decode()
+        )
+        db.session.commit()
+
+    expected_summary = {
+        "scheduledMeetingCount": 2,
+        "acceptedMeetingCount": 1,
+        "acceptedMeetingPercent": 50,
+        "scheduledMeetingMinutes": 90,
+        "measurementPeriodDays": 30,
+    }
+
+    with (
+        patch(
+            "backend.app.get_calendar_events",
+            return_value=[],
+        ) as get_events,
+        patch(
+            "backend.app.summarize_calendar_events",
+            return_value=expected_summary,
+        ) as summarize_events,
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/calendar-metrics"
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == expected_summary
+
+    get_events.assert_called_once()
+    assert get_events.call_args.args[0] == (
+        "test-microsoft-access-token"
+    )
+    summarize_events.assert_called_once_with([])
