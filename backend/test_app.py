@@ -657,3 +657,59 @@ def test_external_identity_rejects_duplicate_employee_link(
             "linear:user-2",
         )
         assert identity.employee_id is None
+
+def test_microsoft_profile_returns_safe_metadata(
+    client,
+    app,
+):
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        microsoft_source.status = "connected"
+        microsoft_source.access_token_encrypted = (
+            encryption.encrypt(
+                b"test-microsoft-access-token"
+            ).decode()
+        )
+        db.session.commit()
+
+    with patch(
+        "backend.app.get_current_user",
+        return_value={
+            "id": "microsoft-user-1",
+            "displayName": "Roba Abdeta",
+        },
+    ) as get_user:
+        response = client.get(
+            "/api/integrations/microsoft/profile"
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "id": "microsoft-user-1",
+        "displayName": "Roba Abdeta",
+    }
+
+    get_user.assert_called_once_with(
+        "test-microsoft-access-token"
+    )
+
+def test_microsoft_profile_requires_connection(
+    client,
+):
+    response = client.get(
+        "/api/integrations/microsoft/profile"
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "Microsoft Graph is not connected"
+    }

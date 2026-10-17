@@ -17,6 +17,10 @@ from backend.integrations.linear import (
     get_workspace_members,
     refresh_oauth_tokens,
 )
+from backend.integrations.microsoft import (
+    MicrosoftGraphError,
+    get_current_user,
+)
 
 load_dotenv()
 
@@ -324,6 +328,51 @@ def create_app(test_config=None):
             f"{app.config['FRONTEND_URL']}"
             "?microsoft=connected"
         )
+
+    @app.get("/api/integrations/microsoft/profile")
+    def get_microsoft_profile():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one_or_none()
+
+        if (
+            microsoft_source is None
+            or microsoft_source.status != "connected"
+            or not microsoft_source.access_token_encrypted
+        ):
+            return jsonify(
+                error="Microsoft Graph is not connected"
+            ), 409
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        try:
+            access_token = encryption.decrypt(
+                microsoft_source
+                .access_token_encrypted
+                .encode()
+            ).decode()
+        except InvalidToken:
+            return jsonify(
+                error="Stored Microsoft token is invalid"
+            ), 500
+
+        try:
+            profile = get_current_user(access_token)
+        except MicrosoftGraphError:
+            return jsonify(
+                error=(
+                    "Unable to retrieve Microsoft "
+                    "profile"
+                )
+            ), 502
+
+        return jsonify(profile)
+
 
     @app.get("/api/integrations/linear/callback")
     def linear_callback():
