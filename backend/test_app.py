@@ -19,6 +19,12 @@ def app():
             "LINEAR_CLIENT_ID": "test-client-id",
             "LINEAR_CLIENT_SECRET": "test-client-secret",
             "LINEAR_REDIRECT_URI": "http://localhost/test-callback",
+            "MICROSOFT_CLIENT_ID": "test-microsoft-client-id",
+            "MICROSOFT_CLIENT_SECRET": "test-microsoft-secret",
+            "MICROSOFT_AUTHORITY_TENANT": "common",
+            "MICROSOFT_REDIRECT_URI": (
+                "http://localhost/test-microsoft-callback"
+            ),
             "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
             "FRONTEND_URL": "http://localhost:5173",
         }
@@ -111,6 +117,7 @@ def test_data_sources_endpoint(client):
 
 
 def test_linear_connect_redirect(client):
+
     response = client.get("/api/integrations/linear/connect")
 
     assert response.status_code == 302
@@ -126,6 +133,107 @@ def test_linear_connect_redirect(client):
     with client.session_transaction() as oauth_session:
         assert query["state"] == [oauth_session["linear_oauth_state"]]
 
+def test_microsoft_connect_redirect(client):
+    response = client.get(
+        "/api/integrations/microsoft/connect"
+    )
+
+    assert response.status_code == 302
+
+    redirect_url = urlparse(response.headers["Location"])
+    query = parse_qs(redirect_url.query)
+
+    assert redirect_url.netloc == "login.microsoftonline.com"
+    assert redirect_url.path == (
+        "/common/oauth2/v2.0/authorize"
+    )
+    assert query["client_id"] == [
+        "test-microsoft-client-id"
+    ]
+    assert query["redirect_uri"] == [
+        "http://localhost/test-microsoft-callback"
+    ]
+    assert query["response_type"] == ["code"]
+    assert query["response_mode"] == ["query"]
+    assert query["scope"] == [
+        (
+            "openid profile offline_access "
+            "User.Read Calendars.ReadBasic"
+        )
+    ]
+
+    with client.session_transaction() as oauth_session:
+        assert query["state"] == [
+            oauth_session["microsoft_oauth_state"]
+        ]
+
+def test_microsoft_callback_rejects_invalid_state(client):
+    response = client.get(
+        "/api/integrations/microsoft/callback",
+        query_string={
+            "code": "temporary-code",
+            "state": "invalid-state",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Invalid Microsoft OAuth callback"
+    }
+
+def test_microsoft_callback_stores_encrypted_tokens(
+    client,
+    app,
+):
+    client.get("/api/integrations/microsoft/connect")
+
+    with client.session_transaction() as oauth_session:
+        state = oauth_session["microsoft_oauth_state"]
+
+    token_response = Mock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "test-microsoft-access-token",
+        "refresh_token": "test-microsoft-refresh-token",
+        "expires_in": 3600,
+    }
+
+    with patch(
+        "backend.app.requests.post",
+        return_value=token_response,
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/callback",
+            query_string={
+                "code": "temporary-code",
+                "state": state,
+            },
+        )
+
+    assert response.status_code == 302
+    assert response.location == (
+        "http://localhost:5173?microsoft=connected"
+    )
+
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        assert microsoft_source.status == "connected"
+        assert encryption.decrypt(
+            microsoft_source.access_token_encrypted.encode()
+        ).decode() == "test-microsoft-access-token"
+        assert encryption.decrypt(
+            microsoft_source.refresh_token_encrypted.encode()
+        ).decode() == "test-microsoft-refresh-token"
+        assert microsoft_source.token_expires_at is not None
 
 def test_linear_callback_rejects_invalid_state(client):
     response = client.get(

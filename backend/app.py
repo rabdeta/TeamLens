@@ -27,6 +27,18 @@ def create_app(test_config=None):
     app = Flask(__name__)
 
     if test_config is None:
+        app.config["MICROSOFT_CLIENT_ID"] = os.environ[
+            "MICROSOFT_CLIENT_ID"
+        ]
+        app.config["MICROSOFT_CLIENT_SECRET"] = os.environ[
+            "MICROSOFT_CLIENT_SECRET"
+        ]
+        app.config["MICROSOFT_AUTHORITY_TENANT"] = os.environ[
+            "MICROSOFT_AUTHORITY_TENANT"
+        ]
+        app.config["MICROSOFT_REDIRECT_URI"] = os.environ[
+            "MICROSOFT_REDIRECT_URI"
+        ]
         app.config["TOKEN_ENCRYPTION_KEY"] = os.environ[
             "TOKEN_ENCRYPTION_KEY"
         ]        
@@ -168,6 +180,150 @@ def create_app(test_config=None):
         )
 
         return redirect(f"https://linear.app/oauth/authorize?{query}")
+
+
+    @app.get("/api/integrations/microsoft/connect")
+    def connect_microsoft():
+        state = secrets.token_urlsafe(32)
+        session["microsoft_oauth_state"] = state
+
+        query = urlencode(
+            {
+                "client_id": app.config[
+                    "MICROSOFT_CLIENT_ID"
+                ],
+                "redirect_uri": app.config[
+                    "MICROSOFT_REDIRECT_URI"
+                ],
+                "response_type": "code",
+                "response_mode": "query",
+                "scope": (
+                    "openid profile offline_access "
+                    "User.Read Calendars.ReadBasic"
+                ),
+                "state": state,
+            }
+        )
+
+        authority_tenant = app.config[
+            "MICROSOFT_AUTHORITY_TENANT"
+        ]
+
+        return redirect(
+            "https://login.microsoftonline.com/"
+            f"{authority_tenant}/oauth2/v2.0/authorize?"
+            f"{query}"
+        )
+
+    @app.get("/api/integrations/microsoft/callback")
+    def microsoft_callback():
+        authorization_code = request.args.get("code")
+        returned_state = request.args.get("state")
+        expected_state = session.pop(
+            "microsoft_oauth_state",
+            None,
+        )
+
+        if (
+            not authorization_code
+            or not returned_state
+            or not expected_state
+            or not secrets.compare_digest(
+                returned_state,
+                expected_state,
+            )
+        ):
+            return jsonify(
+                error="Invalid Microsoft OAuth callback"
+            ), 400
+
+        authority_tenant = app.config[
+            "MICROSOFT_AUTHORITY_TENANT"
+        ]
+
+        try:
+            token_response = requests.post(
+                "https://login.microsoftonline.com/"
+                f"{authority_tenant}/oauth2/v2.0/token",
+                data={
+                    "client_id": app.config[
+                        "MICROSOFT_CLIENT_ID"
+                    ],
+                    "client_secret": app.config[
+                        "MICROSOFT_CLIENT_SECRET"
+                    ],
+                    "code": authorization_code,
+                    "redirect_uri": app.config[
+                        "MICROSOFT_REDIRECT_URI"
+                    ],
+                    "grant_type": "authorization_code",
+                    "scope": (
+                        "openid profile offline_access "
+                        "User.Read Calendars.ReadBasic"
+                    ),
+                },
+                timeout=10,
+            )
+            token_response.raise_for_status()
+            token_data = token_response.json()
+        except (requests.RequestException, ValueError):
+            return jsonify(
+                error="Unable to connect to Microsoft"
+            ), 502
+
+        access_token = token_data.get("access_token")
+        refresh_token = token_data.get("refresh_token")
+        expires_in = token_data.get("expires_in")
+
+        if (
+            not access_token
+            or not refresh_token
+            or not isinstance(expires_in, int)
+        ):
+            return jsonify(
+                error=(
+                    "Microsoft returned an invalid "
+                    "token response"
+                )
+            ), 502
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one_or_none()
+
+        if microsoft_source is None:
+            return jsonify(
+                error="Microsoft Graph data source not found"
+            ), 404
+
+        microsoft_source.access_token_encrypted = (
+            encryption.encrypt(
+                access_token.encode()
+            ).decode()
+        )
+        microsoft_source.refresh_token_encrypted = (
+            encryption.encrypt(
+                refresh_token.encode()
+            ).decode()
+        )
+        microsoft_source.token_expires_at = (
+            datetime.now(timezone.utc)
+            + timedelta(seconds=expires_in)
+        )
+        microsoft_source.status = "connected"
+
+        db.session.commit()
+
+        return redirect(
+            f"{app.config['FRONTEND_URL']}"
+            "?microsoft=connected"
+        )
 
     @app.get("/api/integrations/linear/callback")
     def linear_callback():
