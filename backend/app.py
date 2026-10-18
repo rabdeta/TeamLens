@@ -210,7 +210,7 @@ def create_app(test_config=None):
                 "response_mode": "query",
                 "scope": (
                     "openid profile offline_access "
-                    "User.Read Calendars.ReadBasic"
+                    "User.Read Calendars.Read"
                 ),
                 "state": state,
             }
@@ -270,7 +270,7 @@ def create_app(test_config=None):
                     "grant_type": "authorization_code",
                     "scope": (
                         "openid profile offline_access "
-                        "User.Read Calendars.ReadBasic"
+                        "User.Read Calendars.Read"
                     ),
                 },
                 timeout=10,
@@ -432,6 +432,9 @@ def create_app(test_config=None):
             )
             summary = summarize_calendar_events(events)
         except MicrosoftGraphError:
+            app.logger.exception(
+                "Microsoft calendar metadata request failed"
+            )
             return jsonify(
                 error=(
                     "Unable to retrieve Microsoft "

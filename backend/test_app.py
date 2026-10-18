@@ -158,7 +158,7 @@ def test_microsoft_connect_redirect(client):
     assert query["scope"] == [
         (
             "openid profile offline_access "
-            "User.Read Calendars.ReadBasic"
+            "User.Read Calendars.Read"
         )
     ]
 
