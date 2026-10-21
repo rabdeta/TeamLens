@@ -767,3 +767,72 @@ def test_microsoft_calendar_metrics_returns_summary(
         "test-microsoft-access-token"
     )
     summarize_events.assert_called_once_with([])
+
+def test_microsoft_calendar_refreshes_expired_token(
+    client,
+    app,
+):
+    with app.app_context():
+        source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        source.status = "connected"
+        source.access_token_encrypted = encryption.encrypt(
+            b"old-access-token"
+        ).decode()
+        source.refresh_token_encrypted = encryption.encrypt(
+            b"old-refresh-token"
+        ).decode()
+        source.token_expires_at = (
+            datetime.now(timezone.utc)
+            - timedelta(minutes=1)
+        )
+        db.session.commit()
+
+    expected_summary = {
+        "scheduledMeetingCount": 0,
+        "acceptedMeetingCount": 0,
+        "acceptedMeetingPercent": 0,
+        "scheduledMeetingMinutes": 0,
+        "measurementPeriodDays": 30,
+    }
+
+    with (
+        patch(
+            "backend.app.refresh_microsoft_oauth_tokens",
+            return_value={
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "expires_in": 3600,
+            },
+        ) as refresh_tokens,
+        patch(
+            "backend.app.get_calendar_events",
+            return_value=[],
+        ) as get_events,
+        patch(
+            "backend.app.summarize_calendar_events",
+            return_value=expected_summary,
+        ),
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/calendar-metrics"
+        )
+
+    assert response.status_code == 200
+
+    refresh_tokens.assert_called_once_with(
+        "old-refresh-token",
+        "test-microsoft-client-id",
+        "test-microsoft-secret",
+        "common",
+    )
+
+    assert get_events.call_args.args[0] == "new-access-token"

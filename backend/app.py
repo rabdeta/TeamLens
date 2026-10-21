@@ -25,6 +25,7 @@ from backend.integrations.microsoft import (
     MicrosoftGraphError,
     get_calendar_events,
     get_current_user,
+    refresh_oauth_tokens as refresh_microsoft_oauth_tokens,
     summarize_calendar_events,
 )
 
@@ -413,6 +414,78 @@ def create_app(test_config=None):
             return jsonify(
                 error="Stored Microsoft token is invalid"
             ), 500
+
+        expires_at = microsoft_source.token_expires_at
+
+        if expires_at is not None and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(
+                tzinfo=timezone.utc
+            )
+
+        token_needs_refresh = (
+            expires_at is not None
+            and expires_at
+            <= datetime.now(timezone.utc)
+            + timedelta(minutes=5)
+        )
+
+        if token_needs_refresh:
+            if not microsoft_source.refresh_token_encrypted:
+                return jsonify(
+                    error="Microsoft must be reconnected"
+                ), 409
+
+            try:
+                refresh_token = encryption.decrypt(
+                    microsoft_source
+                    .refresh_token_encrypted
+                    .encode()
+                ).decode()
+
+                token_data = (
+                    refresh_microsoft_oauth_tokens(
+                        refresh_token,
+                        app.config["MICROSOFT_CLIENT_ID"],
+                        app.config[
+                            "MICROSOFT_CLIENT_SECRET"
+                        ],
+                        app.config[
+                            "MICROSOFT_AUTHORITY_TENANT"
+                        ],
+                    )
+                )
+            except InvalidToken:
+                return jsonify(
+                    error="Stored Microsoft token is invalid"
+                ), 500
+            except MicrosoftGraphError:
+                return jsonify(
+                    error=(
+                        "Unable to refresh Microsoft "
+                        "connection"
+                    )
+                ), 502
+
+            access_token = token_data["access_token"]
+
+            microsoft_source.access_token_encrypted = (
+                encryption.encrypt(
+                    access_token.encode()
+                ).decode()
+            )
+            microsoft_source.refresh_token_encrypted = (
+                encryption.encrypt(
+                    token_data["refresh_token"].encode()
+                ).decode()
+            )
+            microsoft_source.token_expires_at = (
+                datetime.now(timezone.utc)
+                + timedelta(
+                    seconds=token_data["expires_in"]
+                )
+            )
+
+            db.session.commit()
 
         end_time = datetime.now(timezone.utc)
         start_time = end_time - timedelta(days=30)

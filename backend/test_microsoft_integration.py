@@ -18,6 +18,56 @@ from backend.integrations.microsoft import (
     get_current_user,
     summarize_calendar_events,
 )
+from backend.integrations.microsoft import (
+    MicrosoftGraphError,
+    execute_query,
+    get_calendar_events,
+    get_current_user,
+    refresh_oauth_tokens,
+    summarize_calendar_events,
+)
+
+def test_refresh_oauth_tokens_returns_rotated_tokens():
+    token_response = Mock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 3600,
+    }
+
+    with patch(
+        "backend.integrations.microsoft.requests.post",
+        return_value=token_response,
+    ) as token_request:
+        result = refresh_oauth_tokens(
+            "old-refresh-token",
+            "test-client-id",
+            "test-client-secret",
+            "consumers",
+        )
+
+    assert result == {
+        "access_token": "new-access-token",
+        "refresh_token": "new-refresh-token",
+        "expires_in": 3600,
+    }
+
+    token_request.assert_called_once_with(
+        "https://login.microsoftonline.com/"
+        "consumers/oauth2/v2.0/token",
+        data={
+            "client_id": "test-client-id",
+            "client_secret": "test-client-secret",
+            "refresh_token": "old-refresh-token",
+            "grant_type": "refresh_token",
+            "scope": (
+                "openid profile offline_access "
+                "User.Read Calendars.Read"
+            ),
+        },
+        timeout=10,
+    )
 
 def test_execute_query_returns_data():
     graph_response = Mock()

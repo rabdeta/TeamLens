@@ -177,3 +177,56 @@ def summarize_calendar_events(events):
         "scheduledMeetingMinutes": scheduled_minutes,
         "measurementPeriodDays": 30,
     }
+
+def refresh_oauth_tokens(
+    refresh_token,
+    client_id,
+    client_secret,
+    authority_tenant,
+):
+    try:
+        response = requests.post(
+            "https://login.microsoftonline.com/"
+            f"{authority_tenant}/oauth2/v2.0/token",
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "scope": (
+                    "openid profile offline_access "
+                    "User.Read Calendars.Read"
+                ),
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        token_data = response.json()
+    except (requests.RequestException, ValueError) as error:
+        raise MicrosoftGraphError(
+            "Unable to refresh Microsoft OAuth tokens"
+        ) from error
+
+    access_token = token_data.get("access_token")
+    new_refresh_token = token_data.get(
+        "refresh_token",
+        refresh_token,
+    )
+    expires_in = token_data.get("expires_in")
+
+    if (
+        not isinstance(access_token, str)
+        or not access_token
+        or not isinstance(new_refresh_token, str)
+        or not new_refresh_token
+        or not isinstance(expires_in, int)
+    ):
+        raise MicrosoftGraphError(
+            "Microsoft returned an invalid token response"
+        )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": new_refresh_token,
+        "expires_in": expires_in,
+    }
