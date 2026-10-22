@@ -6,6 +6,10 @@ import DataSourceCard from './components/DataSourceCard'
 import type { DataSource } from './types/dataSource'
 import type { LinearMetricsResponse } from './types/linear'
 import type { ExternalIdentity } from './types/externalIdentity'
+import type {
+  MicrosoftCalendarMetrics,
+  MicrosoftProfile,
+} from './types/microsoft'
 
 function App() {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([])
@@ -22,6 +26,14 @@ function App() {
     useState<LinearMetricsResponse | null>(null)
   const [isLinearSyncing, setIsLinearSyncing] = useState(false)
   const [linearSyncError, setLinearSyncError] = useState('')
+  const [microsoftProfile, setMicrosoftProfile] =
+    useState<MicrosoftProfile | null>(null)
+  const [microsoftMetrics, setMicrosoftMetrics] =
+    useState<MicrosoftCalendarMetrics | null>(null)
+  const [isMicrosoftSyncing, setIsMicrosoftSyncing] =
+    useState(false)
+  const [microsoftSyncError, setMicrosoftSyncError] =
+    useState('')
   const [externalIdentities, setExternalIdentities] = useState<
     ExternalIdentity[]
   >([])
@@ -29,6 +41,17 @@ function App() {
   const [linkingIdentityId, setLinkingIdentityId] = useState<
     string | null
   >(null)
+  const handleConnectDataSource = (provider: string) => {
+    if (provider === 'linear') {
+      window.location.assign(
+        'http://127.0.0.1:5000/api/integrations/linear/connect',
+      )
+    } else if (provider === 'microsoft_graph') {
+      window.location.assign(
+        'http://localhost:5000/api/integrations/microsoft/connect',
+      )
+    }
+  }
 
   useEffect(() => {
     const loadEmployees = async () => {
@@ -132,13 +155,7 @@ function App() {
     }
   }
 
-  const handleConnectDataSource = (provider: string) => {
-    if (provider === 'linear') {
-      window.location.assign(
-        'http://127.0.0.1:5000/api/integrations/linear/connect',
-      )
-    }
-  }
+
 
   const handleSyncLinear = async () => {
     setIsLinearSyncing(true)
@@ -181,7 +198,8 @@ function App() {
 
       setLinearMetrics(data)
       setExternalIdentities(identities)
-      setEmployees(refreshedEmployees)    } catch (caughtError) {
+      setEmployees(refreshedEmployees)
+    } catch (caughtError) {
       setLinearSyncError(
         caughtError instanceof Error
           ? caughtError.message
@@ -189,6 +207,56 @@ function App() {
       )
     } finally {
       setIsLinearSyncing(false)
+    }
+  }
+
+  const handleSyncMicrosoft = async () => {
+    setIsMicrosoftSyncing(true)
+    setMicrosoftSyncError('')
+
+    try {
+      const metricsResponse = await fetch(
+        '/api/integrations/microsoft/calendar-metrics',
+      )
+
+      if (!metricsResponse.ok) {
+        throw new Error(
+          'Failed to sync Microsoft calendar metadata',
+        )
+      }
+
+      const profileResponse = await fetch(
+        '/api/integrations/microsoft/profile',
+      )
+
+      if (!profileResponse.ok) {
+        throw new Error(
+          'Failed to load Microsoft profile metadata',
+        )
+      }
+
+      const metrics: MicrosoftCalendarMetrics =
+        await metricsResponse.json()
+      const profile: MicrosoftProfile =
+        await profileResponse.json()
+
+      setMicrosoftMetrics(metrics)
+      setMicrosoftProfile(profile)
+    } catch (caughtError) {
+      setMicrosoftSyncError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'An unexpected error occurred',
+      )
+    } finally {
+      setIsMicrosoftSyncing(false)
+    }
+  }
+    const handleSyncDataSource = async (provider: string) => {
+    if (provider === 'linear') {
+      await handleSyncLinear()
+    } else if (provider === 'microsoft_graph') {
+      await handleSyncMicrosoft()
     }
   }
 
@@ -309,17 +377,29 @@ function App() {
 
         <div className="data-source-grid">
           {dataSources.map((source) => (
-            <DataSourceCard
-              key={source.id}
-              source={source}
-              onConnect={handleConnectDataSource}
-              onSync={handleSyncLinear}
-              isSyncing={isLinearSyncing}
-            />
-          ))}
+<DataSourceCard
+  key={source.id}
+  source={source}
+  onConnect={handleConnectDataSource}
+  onSync={handleSyncDataSource}
+  isSyncing={
+    (source.provider === 'linear' && isLinearSyncing) ||
+    (source.provider === 'microsoft_graph' &&
+      isMicrosoftSyncing)
+  }
+/>
+))}
         </div>
         {linearSyncError && (
           <p role="alert">{linearSyncError}</p>
+        )}
+
+        {linearSyncError && (
+          <p role="alert">{linearSyncError}</p>
+        )}
+
+        {microsoftSyncError && (
+          <p role="alert">{microsoftSyncError}</p>
         )}
 
         {linearMetrics && (
@@ -340,6 +420,40 @@ function App() {
                   </p>
                 </article>
               ))}
+            </div>
+          </div>
+        )}
+
+        {microsoftProfile && microsoftMetrics && (
+          <div className="linear-metrics">
+            <h3>Microsoft calendar summary</h3>
+
+            <div className="linear-metrics-grid">
+              <article>
+                <h4>
+                  {microsoftMetrics.scheduledMeetingCount}
+                </h4>
+                <p>
+                  Scheduled meetings over the last{' '}
+                  {microsoftMetrics.measurementPeriodDays} days
+                </p>
+              </article>
+
+              <article>
+                <h4>
+                  {microsoftMetrics.scheduledMeetingMinutes}
+                </h4>
+                <p>Scheduled meeting minutes</p>
+              </article>
+
+              <article>
+                <h4>
+                  {microsoftMetrics.acceptedMeetingPercent}%
+                </h4>
+                <p>
+                  RSVP acceptance rate—not verified attendance
+                </p>
+              </article>
             </div>
           </div>
         )}
