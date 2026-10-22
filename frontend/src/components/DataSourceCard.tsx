@@ -3,7 +3,7 @@ import type { DataSource } from '../types/dataSource'
 type DataSourceCardProps = {
   source: DataSource
   onConnect: (provider: string) => void
-  onSync: () => void
+  onSync: (provider: string) => void
   isSyncing: boolean
 }
 
@@ -14,10 +14,12 @@ function DataSourceCard({
   isSyncing,
 }: DataSourceCardProps) {
   const statusLabel = source.status.replace('_', ' ')
-  const isLinear = source.provider === 'linear'
+  const isSupported =
+    source.provider === 'linear' ||
+    source.provider === 'microsoft_graph'
   const isConnected = source.status === 'connected'
-  const canConnect = isLinear && !isConnected
-  const canSync = isLinear && isConnected
+  const canConnect = isSupported && !isConnected
+  const canSync = isSupported && isConnected
 
   let buttonLabel = 'Coming soon'
 
@@ -31,7 +33,7 @@ function DataSourceCard({
 
   const handleClick = () => {
     if (canSync) {
-      onSync()
+      onSync(source.provider)
     } else if (canConnect) {
       onConnect(source.provider)
     }

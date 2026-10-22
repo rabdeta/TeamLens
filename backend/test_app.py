@@ -19,6 +19,12 @@ def app():
             "LINEAR_CLIENT_ID": "test-client-id",
             "LINEAR_CLIENT_SECRET": "test-client-secret",
             "LINEAR_REDIRECT_URI": "http://localhost/test-callback",
+            "MICROSOFT_CLIENT_ID": "test-microsoft-client-id",
+            "MICROSOFT_CLIENT_SECRET": "test-microsoft-secret",
+            "MICROSOFT_AUTHORITY_TENANT": "common",
+            "MICROSOFT_REDIRECT_URI": (
+                "http://localhost/test-microsoft-callback"
+            ),
             "TOKEN_ENCRYPTION_KEY": Fernet.generate_key().decode(),
             "FRONTEND_URL": "http://localhost:5173",
         }
@@ -111,6 +117,7 @@ def test_data_sources_endpoint(client):
 
 
 def test_linear_connect_redirect(client):
+
     response = client.get("/api/integrations/linear/connect")
 
     assert response.status_code == 302
@@ -126,6 +133,107 @@ def test_linear_connect_redirect(client):
     with client.session_transaction() as oauth_session:
         assert query["state"] == [oauth_session["linear_oauth_state"]]
 
+def test_microsoft_connect_redirect(client):
+    response = client.get(
+        "/api/integrations/microsoft/connect"
+    )
+
+    assert response.status_code == 302
+
+    redirect_url = urlparse(response.headers["Location"])
+    query = parse_qs(redirect_url.query)
+
+    assert redirect_url.netloc == "login.microsoftonline.com"
+    assert redirect_url.path == (
+        "/common/oauth2/v2.0/authorize"
+    )
+    assert query["client_id"] == [
+        "test-microsoft-client-id"
+    ]
+    assert query["redirect_uri"] == [
+        "http://localhost/test-microsoft-callback"
+    ]
+    assert query["response_type"] == ["code"]
+    assert query["response_mode"] == ["query"]
+    assert query["scope"] == [
+        (
+            "openid profile offline_access "
+            "User.Read Calendars.Read"
+        )
+    ]
+
+    with client.session_transaction() as oauth_session:
+        assert query["state"] == [
+            oauth_session["microsoft_oauth_state"]
+        ]
+
+def test_microsoft_callback_rejects_invalid_state(client):
+    response = client.get(
+        "/api/integrations/microsoft/callback",
+        query_string={
+            "code": "temporary-code",
+            "state": "invalid-state",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Invalid Microsoft OAuth callback"
+    }
+
+def test_microsoft_callback_stores_encrypted_tokens(
+    client,
+    app,
+):
+    client.get("/api/integrations/microsoft/connect")
+
+    with client.session_transaction() as oauth_session:
+        state = oauth_session["microsoft_oauth_state"]
+
+    token_response = Mock()
+    token_response.raise_for_status.return_value = None
+    token_response.json.return_value = {
+        "access_token": "test-microsoft-access-token",
+        "refresh_token": "test-microsoft-refresh-token",
+        "expires_in": 3600,
+    }
+
+    with patch(
+        "backend.app.requests.post",
+        return_value=token_response,
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/callback",
+            query_string={
+                "code": "temporary-code",
+                "state": state,
+            },
+        )
+
+    assert response.status_code == 302
+    assert response.location == (
+        "http://localhost:5173?microsoft=connected"
+    )
+
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        assert microsoft_source.status == "connected"
+        assert encryption.decrypt(
+            microsoft_source.access_token_encrypted.encode()
+        ).decode() == "test-microsoft-access-token"
+        assert encryption.decrypt(
+            microsoft_source.refresh_token_encrypted.encode()
+        ).decode() == "test-microsoft-refresh-token"
+        assert microsoft_source.token_expires_at is not None
 
 def test_linear_callback_rejects_invalid_state(client):
     response = client.get(
@@ -549,3 +657,182 @@ def test_external_identity_rejects_duplicate_employee_link(
             "linear:user-2",
         )
         assert identity.employee_id is None
+
+def test_microsoft_profile_returns_safe_metadata(
+    client,
+    app,
+):
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        microsoft_source.status = "connected"
+        microsoft_source.access_token_encrypted = (
+            encryption.encrypt(
+                b"test-microsoft-access-token"
+            ).decode()
+        )
+        db.session.commit()
+
+    with patch(
+        "backend.app.get_current_user",
+        return_value={
+            "id": "microsoft-user-1",
+            "displayName": "Roba Abdeta",
+        },
+    ) as get_user:
+        response = client.get(
+            "/api/integrations/microsoft/profile"
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "id": "microsoft-user-1",
+        "displayName": "Roba Abdeta",
+    }
+
+    get_user.assert_called_once_with(
+        "test-microsoft-access-token"
+    )
+
+def test_microsoft_profile_requires_connection(
+    client,
+):
+    response = client.get(
+        "/api/integrations/microsoft/profile"
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {
+        "error": "Microsoft Graph is not connected"
+    }
+
+def test_microsoft_calendar_metrics_returns_summary(
+    client,
+    app,
+):
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        microsoft_source.status = "connected"
+        microsoft_source.access_token_encrypted = (
+            encryption.encrypt(
+                b"test-microsoft-access-token"
+            ).decode()
+        )
+        db.session.commit()
+
+    expected_summary = {
+        "scheduledMeetingCount": 2,
+        "acceptedMeetingCount": 1,
+        "acceptedMeetingPercent": 50,
+        "scheduledMeetingMinutes": 90,
+        "measurementPeriodDays": 30,
+    }
+
+    with (
+        patch(
+            "backend.app.get_calendar_events",
+            return_value=[],
+        ) as get_events,
+        patch(
+            "backend.app.summarize_calendar_events",
+            return_value=expected_summary,
+        ) as summarize_events,
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/calendar-metrics"
+        )
+
+    assert response.status_code == 200
+    assert response.get_json() == expected_summary
+
+    get_events.assert_called_once()
+    assert get_events.call_args.args[0] == (
+        "test-microsoft-access-token"
+    )
+    summarize_events.assert_called_once_with([])
+
+def test_microsoft_calendar_refreshes_expired_token(
+    client,
+    app,
+):
+    with app.app_context():
+        source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        source.status = "connected"
+        source.access_token_encrypted = encryption.encrypt(
+            b"old-access-token"
+        ).decode()
+        source.refresh_token_encrypted = encryption.encrypt(
+            b"old-refresh-token"
+        ).decode()
+        source.token_expires_at = (
+            datetime.now(timezone.utc)
+            - timedelta(minutes=1)
+        )
+        db.session.commit()
+
+    expected_summary = {
+        "scheduledMeetingCount": 0,
+        "acceptedMeetingCount": 0,
+        "acceptedMeetingPercent": 0,
+        "scheduledMeetingMinutes": 0,
+        "measurementPeriodDays": 30,
+    }
+
+    with (
+        patch(
+            "backend.app.refresh_microsoft_oauth_tokens",
+            return_value={
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "expires_in": 3600,
+            },
+        ) as refresh_tokens,
+        patch(
+            "backend.app.get_calendar_events",
+            return_value=[],
+        ) as get_events,
+        patch(
+            "backend.app.summarize_calendar_events",
+            return_value=expected_summary,
+        ),
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/calendar-metrics"
+        )
+
+    assert response.status_code == 200
+
+    refresh_tokens.assert_called_once_with(
+        "old-refresh-token",
+        "test-microsoft-client-id",
+        "test-microsoft-secret",
+        "common",
+    )
+
+    assert get_events.call_args.args[0] == "new-access-token"
