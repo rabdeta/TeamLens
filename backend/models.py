@@ -140,6 +140,12 @@ class ExternalIdentity(db.Model):
         db.String(100),
         nullable=False,
     )
+
+    principal_hash = db.Column(
+        db.String(64),
+        nullable=True,
+    )
+
     display_name = db.Column(
         db.String(120),
         nullable=False,
@@ -161,6 +167,11 @@ class ExternalIdentity(db.Model):
             "data_source_id",
             "external_user_id",
             name="uq_external_identity_source_user",
+        ),
+        db.UniqueConstraint(
+            "data_source_id",
+            "principal_hash",
+            name="uq_external_identity_source_principal",
         ),
     )
 
