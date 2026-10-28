@@ -22,16 +22,16 @@ function EmployeeCard({ employee, onSelect }: EmployeeCardProps) {
           <dd>{employee.responseTimeMinutes} min</dd>
         </div>
         <div>
-          <dt>Meeting attendance</dt>
-          <dd>{employee.meetingAttendancePercent}%</dd>
+          <dt>Meeting RSVPs</dt>
+          <dd>
+            {employee.acceptedMeetingCount}/
+            {employee.scheduledMeetingCount} accepted (
+            {employee.meetingAcceptancePercent}%)
+          </dd>
         </div>
         <div>
-          <dt>Tasks completed</dt>
-          <dd>{employee.tasksCompleted}</dd>
-        </div>
-        <div>
-          <dt>Collaboration</dt>
-          <dd>{employee.collaborationScore}/100</dd>
+          <dt>Scheduled meeting time</dt>
+          <dd>{employee.scheduledMeetingMinutes} min</dd>
         </div>
       </dl>
 

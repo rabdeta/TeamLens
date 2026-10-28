@@ -10,6 +10,10 @@ import type {
   MicrosoftCalendarMetrics,
   MicrosoftProfile,
 } from './types/microsoft'
+const IDENTITY_PROVIDER_LABELS: Record<string, string> = {
+  'source-linear': 'Linear',
+  'source-microsoft-graph': 'Microsoft Graph',
+}
 
 function App() {
   const [employees, setEmployees] = useState<EmployeeProfile[]>([])
@@ -235,13 +239,37 @@ function App() {
         )
       }
 
+      const identityResponse = await fetch(
+        '/api/external-identities',
+      )
+
+      if (!identityResponse.ok) {
+        throw new Error(
+          'Microsoft synced, but identities could not be loaded',
+        )
+      }
+
+      const employeeResponse = await fetch('/api/employees')
+
+      if (!employeeResponse.ok) {
+        throw new Error(
+          'Microsoft synced, but employee profiles could not be refreshed',
+        )
+      }
+
       const metrics: MicrosoftCalendarMetrics =
         await metricsResponse.json()
       const profile: MicrosoftProfile =
         await profileResponse.json()
+      const identities: ExternalIdentity[] =
+        await identityResponse.json()
+      const refreshedEmployees: EmployeeProfile[] =
+        await employeeResponse.json()
 
       setMicrosoftMetrics(metrics)
       setMicrosoftProfile(profile)
+      setExternalIdentities(identities)
+      setEmployees(refreshedEmployees)
     } catch (caughtError) {
       setMicrosoftSyncError(
         caughtError instanceof Error
@@ -252,7 +280,7 @@ function App() {
       setIsMicrosoftSyncing(false)
     }
   }
-    const handleSyncDataSource = async (provider: string) => {
+      const handleSyncDataSource = async (provider: string) => {
     if (provider === 'linear') {
       await handleSyncLinear()
     } else if (provider === 'microsoft_graph') {
@@ -464,17 +492,21 @@ function App() {
 
         {externalIdentities.length > 0 && (
           <div className="identity-links">
-            <h3>Link Linear members to employee profiles</h3>
+            <h3>Link external identities to employee profiles</h3>
             <p>
-              Links are explicit to avoid matching employees by
-              name.
+              Links are explicit to avoid automatically matching employees
+            by name.
             </p>
 
             <div className="identity-link-grid">
               {externalIdentities.map((identity) => (
                 <label key={identity.id}>
-                  <span>{identity.displayName}</span>
-
+              <span>
+                {IDENTITY_PROVIDER_LABELS[identity.dataSourceId] ??
+                  'External source'}
+                {' — '}
+                {identity.displayName}
+              </span>
                   <select
                     value={identity.employeeId ?? ''}
                     disabled={

@@ -5,6 +5,10 @@ export type EmployeeProfile = {
   department: string
   responseTimeMinutes: number
   meetingAttendancePercent: number
+  scheduledMeetingCount: number
+  acceptedMeetingCount: number
+  scheduledMeetingMinutes: number
+  meetingAcceptancePercent: number
   tasksCompleted: number
   collaborationScore: number
   summary: string
