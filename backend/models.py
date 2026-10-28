@@ -12,6 +12,30 @@ class Employee(db.Model):
     department = db.Column(db.String(120), nullable=False)
     response_time_minutes = db.Column(db.Integer, nullable=False)
     meeting_attendance_percent = db.Column(db.Integer, nullable=False)
+    scheduled_meeting_count = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    accepted_meeting_count = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    scheduled_meeting_minutes = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    meeting_acceptance_percent = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
     tasks_completed = db.Column(db.Integer, nullable=False)
     collaboration_score = db.Column(db.Integer, nullable=False)
     summary = db.Column(db.Text, nullable=False)
@@ -42,6 +66,14 @@ class Employee(db.Model):
             "department": self.department,
             "responseTimeMinutes": self.response_time_minutes,
             "meetingAttendancePercent": self.meeting_attendance_percent,
+            "scheduledMeetingCount":
+                self.scheduled_meeting_count,
+            "acceptedMeetingCount":
+                self.accepted_meeting_count,
+            "scheduledMeetingMinutes":
+                self.scheduled_meeting_minutes,
+            "meetingAcceptancePercent":
+                self.meeting_acceptance_percent,
             "tasksCompleted": self.tasks_completed,
             "collaborationScore": self.collaboration_score,
             "summary": self.summary,

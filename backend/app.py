@@ -504,6 +504,7 @@ def create_app(test_config=None):
                 end_datetime,
             )
             summary = summarize_calendar_events(events)
+            profile = get_current_user(access_token)
         except MicrosoftGraphError:
             app.logger.exception(
                 "Microsoft calendar metadata request failed"
@@ -514,6 +515,56 @@ def create_app(test_config=None):
                     "calendar metadata"
                 )
             ), 502
+        sync_time = datetime.now(timezone.utc)
+        external_user_id = profile["id"]
+        identity_id = f"microsoft_graph:{external_user_id}"
+
+        identity = db.session.get(
+            ExternalIdentity,
+            identity_id,
+        )
+
+        if identity is None:
+            identity = ExternalIdentity(
+                id=identity_id,
+                data_source_id=microsoft_source.id,
+                external_user_id=external_user_id,
+                display_name=profile["displayName"],
+                active=True,
+                last_synced_at=sync_time,
+            )
+            db.session.add(identity)
+        else:
+            identity.display_name = profile["displayName"]
+            identity.active = True
+            identity.last_synced_at = sync_time
+
+        if identity.employee_id:
+            employee = db.session.get(
+                Employee,
+                identity.employee_id,
+            )
+
+            if employee is not None:
+                employee.scheduled_meeting_count = (
+                    summary["scheduledMeetingCount"]
+                )
+                employee.accepted_meeting_count = (
+                    summary["acceptedMeetingCount"]
+                )
+                employee.scheduled_meeting_minutes = (
+                    summary["scheduledMeetingMinutes"]
+                )
+                employee.meeting_acceptance_percent = (
+                    summary["acceptedMeetingPercent"]
+                )
+                employee.measurement_period_days = (
+                    summary["measurementPeriodDays"]
+                )
+                employee.last_synced_at = sync_time
+
+        microsoft_source.last_synced_at = sync_time
+        db.session.commit()
 
         return jsonify(summary)
 

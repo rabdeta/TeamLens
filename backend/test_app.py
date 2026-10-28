@@ -754,6 +754,13 @@ def test_microsoft_calendar_metrics_returns_summary(
             "backend.app.summarize_calendar_events",
             return_value=expected_summary,
         ) as summarize_events,
+            patch(
+                "backend.app.get_current_user",
+                return_value={
+                    "id": "microsoft-user-1",
+                    "displayName": "Roba Abdeta",
+                },
+            ),
     ):
         response = client.get(
             "/api/integrations/microsoft/calendar-metrics"
@@ -821,6 +828,13 @@ def test_microsoft_calendar_refreshes_expired_token(
             "backend.app.summarize_calendar_events",
             return_value=expected_summary,
         ),
+            patch(
+                "backend.app.get_current_user",
+                return_value={
+                    "id": "microsoft-user-1",
+                    "displayName": "Roba Abdeta",
+                },
+            ),
     ):
         response = client.get(
             "/api/integrations/microsoft/calendar-metrics"
@@ -836,3 +850,85 @@ def test_microsoft_calendar_refreshes_expired_token(
     )
 
     assert get_events.call_args.args[0] == "new-access-token"
+
+def test_microsoft_calendar_sync_updates_linked_employee(
+    client,
+    app,
+):
+    with app.app_context():
+        microsoft_source = db.session.execute(
+            db.select(DataSource).where(
+                DataSource.provider == "microsoft_graph"
+            )
+        ).scalar_one()
+
+        encryption = Fernet(
+            app.config["TOKEN_ENCRYPTION_KEY"].encode()
+        )
+
+        microsoft_source.status = "connected"
+        microsoft_source.access_token_encrypted = (
+            encryption.encrypt(
+                b"test-microsoft-access-token"
+            ).decode()
+        )
+
+        db.session.add(
+            ExternalIdentity(
+                id="microsoft_graph:microsoft-user-1",
+                employee_id="emp-001",
+                data_source_id=microsoft_source.id,
+                external_user_id="microsoft-user-1",
+                display_name="Previous name",
+                active=True,
+            )
+        )
+        db.session.commit()
+
+    expected_summary = {
+        "scheduledMeetingCount": 4,
+        "acceptedMeetingCount": 3,
+        "acceptedMeetingPercent": 75,
+        "scheduledMeetingMinutes": 180,
+        "measurementPeriodDays": 30,
+    }
+
+    with (
+        patch(
+            "backend.app.get_calendar_events",
+            return_value=[],
+        ),
+        patch(
+            "backend.app.summarize_calendar_events",
+            return_value=expected_summary,
+        ),
+        patch(
+            "backend.app.get_current_user",
+            return_value={
+                "id": "microsoft-user-1",
+                "displayName": "Roba Abdeta",
+            },
+        ),
+    ):
+        response = client.get(
+            "/api/integrations/microsoft/calendar-metrics"
+        )
+
+    assert response.status_code == 200
+
+    with app.app_context():
+        employee = db.session.get(Employee, "emp-001")
+        identity = db.session.get(
+            ExternalIdentity,
+            "microsoft_graph:microsoft-user-1",
+        )
+
+        assert employee.scheduled_meeting_count == 4
+        assert employee.accepted_meeting_count == 3
+        assert employee.scheduled_meeting_minutes == 180
+        assert employee.meeting_acceptance_percent == 75
+        assert employee.measurement_period_days == 30
+        assert employee.last_synced_at is not None
+
+        assert identity.display_name == "Roba Abdeta"
+        assert identity.last_synced_at is not None
