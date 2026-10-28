@@ -9,7 +9,13 @@ from sqlalchemy import URL
 from datetime import datetime, timedelta, timezone
 import requests
 from cryptography.fernet import Fernet, InvalidToken
-from backend.models import DataSource, Employee, ExternalIdentity, db
+from backend.models import (
+    CollaborationInsight,
+    DataSource,
+    Employee,
+    ExternalIdentity,
+    db,
+)
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 from backend.integrations.linear import (
     LinearAPIError,
@@ -95,6 +101,60 @@ def create_app(test_config=None):
             return jsonify(error="Employee not found"), 404
 
         return jsonify(employee.to_dict())
+
+    @app.get("/api/collaboration-insights")
+    def get_collaboration_insights():
+        insights = db.session.execute(
+            db.select(CollaborationInsight).order_by(
+                CollaborationInsight.shared_meeting_count.desc(),
+                CollaborationInsight.shared_meeting_minutes.desc(),
+            )
+        ).scalars()
+
+        response_data = []
+
+        for insight in insights:
+            employee_a = db.session.get(
+                Employee,
+                insight.employee_a_id,
+            )
+            employee_b = db.session.get(
+                Employee,
+                insight.employee_b_id,
+            )
+            data_source = db.session.get(
+                DataSource,
+                insight.data_source_id,
+            )
+
+            if (
+                employee_a is None
+                or employee_b is None
+                or data_source is None
+            ):
+                continue
+
+            response_data.append(
+                {
+                    **insight.to_dict(),
+                    "employeeA": {
+                        "id": employee_a.id,
+                        "name": employee_a.name,
+                        "department": employee_a.department,
+                    },
+                    "employeeB": {
+                        "id": employee_b.id,
+                        "name": employee_b.name,
+                        "department": employee_b.department,
+                    },
+                    "source": {
+                        "provider": data_source.provider,
+                        "displayName": data_source.display_name,
+                    },
+                }
+            )
+
+        return jsonify(response_data)
 
     @app.get("/api/data-sources")
     def get_data_sources():

@@ -174,3 +174,71 @@ class ExternalIdentity(db.Model):
             "active": self.active,
             "lastSyncedAt": self.last_synced_at.isoformat(),
         }
+
+class CollaborationInsight(db.Model):
+    __tablename__ = "collaboration_insights"
+
+    id = db.Column(db.String(150), primary_key=True)
+    employee_a_id = db.Column(
+        db.String(50),
+        db.ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    employee_b_id = db.Column(
+        db.String(50),
+        db.ForeignKey("employees.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    data_source_id = db.Column(
+        db.String(50),
+        db.ForeignKey("data_sources.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    shared_meeting_count = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    shared_meeting_minutes = db.Column(
+        db.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    measurement_period_days = db.Column(
+        db.Integer,
+        nullable=False,
+        default=30,
+        server_default="30",
+    )
+    last_synced_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        server_default=db.func.now(),
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "employee_a_id",
+            "employee_b_id",
+            "data_source_id",
+            name="uq_collaboration_pair_source",
+        ),
+        db.CheckConstraint(
+            "employee_a_id <> employee_b_id",
+            name="ck_collaboration_distinct_employees",
+        ),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "employeeAId": self.employee_a_id,
+            "employeeBId": self.employee_b_id,
+            "dataSourceId": self.data_source_id,
+            "sharedMeetingCount": self.shared_meeting_count,
+            "sharedMeetingMinutes": self.shared_meeting_minutes,
+            "measurementPeriodDays": self.measurement_period_days,
+            "lastSyncedAt": self.last_synced_at.isoformat(),
+        }

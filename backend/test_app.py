@@ -5,7 +5,13 @@ from unittest.mock import Mock, patch
 from cryptography.fernet import Fernet
 from urllib.parse import parse_qs, urlparse
 from backend.app import create_app
-from backend.models import DataSource, Employee, ExternalIdentity, db
+from backend.models import (
+    CollaborationInsight,
+    DataSource,
+    Employee,
+    ExternalIdentity,
+    db,
+)
 from backend.seed_data import DATA_SOURCE_SEED_DATA, EMPLOYEE_SEED_DATA
 
 
@@ -932,3 +938,43 @@ def test_microsoft_calendar_sync_updates_linked_employee(
 
         assert identity.display_name == "Roba Abdeta"
         assert identity.last_synced_at is not None
+
+def test_collaboration_insights_endpoint(client, app):
+    with app.app_context():
+        db.session.add(
+            CollaborationInsight(
+                id="source-microsoft-graph:emp-001:emp-002",
+                employee_a_id="emp-001",
+                employee_b_id="emp-002",
+                data_source_id="source-microsoft-graph",
+                shared_meeting_count=4,
+                shared_meeting_minutes=120,
+                measurement_period_days=30,
+            )
+        )
+        db.session.commit()
+
+    response = client.get("/api/collaboration-insights")
+
+    assert response.status_code == 200
+
+    response_data = response.get_json()
+
+    assert len(response_data) == 1
+    assert response_data[0]["employeeA"] == {
+        "id": "emp-001",
+        "name": "Maya Chen",
+        "department": "Engineering",
+    }
+    assert response_data[0]["employeeB"] == {
+        "id": "emp-002",
+        "name": "Jordan Rivera",
+        "department": "Design",
+    }
+    assert response_data[0]["source"] == {
+        "provider": "microsoft_graph",
+        "displayName": "Microsoft Graph",
+    }
+    assert response_data[0]["sharedMeetingCount"] == 4
+    assert response_data[0]["sharedMeetingMinutes"] == 120
+    assert response_data[0]["measurementPeriodDays"] == 30
